@@ -1,6 +1,6 @@
 const currency = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
 let state = { members: [], funds: [] }, activeRoute = "overview", activeFilter = "all", activeSort = "date", editingFundId = null, activeFundId = null, currentReceipt = null, calculatorExpression = "";
-let sharedFundId = new URLSearchParams(location.search).get("fund") || "", forceSharedProfile = Boolean(sharedFundId);
+let sharedFundId = new URLSearchParams(location.search).get("fund") || "", forceSharedProfile = Boolean(sharedFundId), forceProfileSelection = true;
 const byId = id => document.getElementById(id);
 const dateInput = byId("fund-date"); dateInput.value = new Date().toISOString().slice(0, 10);
 const money = value => currency.format(Number(value) || 0);
@@ -101,7 +101,7 @@ function render() {
   renderMembers();
   renderMore();
   if (activeFundId) renderDetail();
-  if (state.members.length && (!currentProfile() || forceSharedProfile)) openProfilePicker();
+  if (state.members.length && (!currentProfile() || forceSharedProfile || forceProfileSelection)) openProfilePicker();
 }
 
 function showRoute(route) {
@@ -123,6 +123,7 @@ document.addEventListener("click", event => {
   if (profileButton) {
     currentMemberId = profileButton.dataset.selectProfile;
     forceSharedProfile = false;
+    forceProfileSelection = false;
     localStorage.setItem(PROFILE_STORAGE_KEY, currentMemberId);
     byId("profile-modal").hidden = true;
     render();
