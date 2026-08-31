@@ -7,8 +7,11 @@ const money = value => currency.format(Number(value) || 0);
 const dateLabel = date => new Intl.DateTimeFormat("en-PH", { month:"short", day:"numeric", year:"numeric" }).format(new Date(`${date}T12:00:00`));
 const initials = name => name.split(/\s+/).slice(0,2).map(part => part[0]).join("").toUpperCase();
 const escapeHtml = value => String(value || "").replace(/[&<'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
-const fundPeople = fund => fund.memberIds.map(id => state.members.find(member => member.id === id) || { id, name:"Former member" });
-const payableMemberIds = fund => fund.memberIds.filter(id => !(fund.splitMode === "itemized" && fund.payerId === id));
+const fundParticipantIds = fund => fund.participantIds || fund.memberIds;
+const fundGuest = (fund, id) => (fund.guests || []).find(guest => guest.id === id);
+const fundPerson = (fund, id) => state.members.find(member => member.id === id) || fundGuest(fund, id) || { id, name:"Former member" };
+const fundPeople = fund => fundParticipantIds(fund).map(id => fundPerson(fund, id));
+const payableMemberIds = fund => fundParticipantIds(fund).filter(id => !(fund.splitMode === "itemized" && fund.payerId === id));
 const paidCount = fund => payableMemberIds(fund).filter(id => fund.payments?.[id]).length;
 const share = fund => Number(fund.total) / Math.max(1, fund.memberIds.length);
 const memberShare = (fund, memberId) => Number(fund.shares?.[memberId] ?? share(fund));
@@ -210,8 +213,9 @@ function installDescriptionEditor() {
   field.append(toolbar, editor);
 }
 
-let activeSplitMode = "equal", itemizedDraft = [];
+let activeSplitMode = "equal", itemizedDraft = [], itemizedGuests = [];
 const newItemId = () => (typeof globalThis !== "undefined" && globalThis.crypto?.randomUUID?.()) || `item-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const itemizedPerson = id => state.members.find(member => member.id === id) || itemizedGuests.find(guest => guest.id === id) || { id, name:"Guest" };
 function ensureItemizedEditor() {
   if (byId("itemized-editor")) return;
   const editor = document.createElement("section");
@@ -223,7 +227,8 @@ function ensureItemizedEditor() {
 }
 function itemizedRowHtml(item, index) {
   const selected = new Set(item.memberIds || []);
-  return `<article class="itemized-row" data-item-row="${escapeHtml(item.id)}"><div class="itemized-row-top"><label><span>Item ${index + 1}</span><input data-item-name maxlength="80" value="${escapeHtml(item.name || "")}" placeholder="e.g. Chicken rice" /></label><label class="itemized-price"><span>Price</span><div class="money-input"><b>₱</b><input data-item-amount type="number" min="0.01" step="0.01" value="${item.amount || ""}" placeholder="0.00" /></div></label><button type="button" class="itemized-remove" data-remove-item aria-label="Remove item">×</button></div><fieldset><legend>Who ordered this?</legend><div class="itemized-members">${state.members.map(member => `<label><input type="checkbox" data-item-member value="${member.id}" ${selected.has(member.id) ? "checked" : ""}/><span>${escapeHtml(member.nickname || member.name)}</span></label>`).join("")}</div></fieldset></article>`;
+  const people = [...state.members, ...itemizedGuests];
+  return `<article class="itemized-row" data-item-row="${escapeHtml(item.id)}"><div class="itemized-row-top"><label><span>Item ${index + 1}</span><input data-item-name maxlength="80" value="${escapeHtml(item.name || "")}" placeholder="e.g. Chicken rice" /></label><label class="itemized-price"><span>Price</span><div class="money-input"><b>₱</b><input data-item-amount type="number" min="0.01" step="0.01" value="${item.amount || ""}" placeholder="0.00" /></div></label><button type="button" class="itemized-remove" data-remove-item aria-label="Remove item">×</button></div><fieldset><legend>Who ordered this?</legend><div class="itemized-members">${people.map(person => `<label><input type="checkbox" data-item-member value="${escapeHtml(person.id)}" ${selected.has(person.id) ? "checked" : ""}/><span>${escapeHtml(person.nickname || person.name)}${person.guest ? " · guest" : ""}</span></label>`).join("")}</div><button type="button" class="itemized-add-person" data-add-item-guest>＋ Add person</button></fieldset></article>`;
 }
 function readItemizedRows() {
   return [...document.querySelectorAll("[data-item-row]")].map(row => ({ id:row.dataset.itemRow, name:row.querySelector("[data-item-name]").value.trim(), amount:Number(row.querySelector("[data-item-amount]").value), memberIds:[...row.querySelectorAll("[data-item-member]:checked")].map(input => input.value) }));
@@ -236,7 +241,7 @@ function updateItemizedSummary() {
   const totals = {}, rows = readItemizedRows().filter(item => Number.isFinite(item.amount) && item.amount > 0 && item.memberIds.length), total = rows.reduce((sum, item) => sum + item.amount, 0);
   rows.forEach(item => { const cents = Math.round(item.amount * 100), base = Math.floor(cents / item.memberIds.length), remainder = cents % item.memberIds.length; item.memberIds.forEach((memberId, index) => { totals[memberId] = (totals[memberId] || 0) + base + (index < remainder ? 1 : 0); }); });
   byId("itemized-total").textContent = money(total);
-  byId("itemized-breakdown").innerHTML = Object.entries(totals).map(([memberId, cents]) => `<span>${escapeHtml((state.members.find(member => member.id === memberId) || { name:"Former member" }).nickname || (state.members.find(member => member.id === memberId) || { name:"Former member" }).name)} <b>${money(cents / 100)}</b></span>`).join("") || `<span>Add an amount and the people sharing it.</span>`;
+  byId("itemized-breakdown").innerHTML = Object.entries(totals).map(([memberId, cents]) => { const person = itemizedPerson(memberId); return `<span>${escapeHtml(person.nickname || person.name)} <b>${money(cents / 100)}</b></span>`; }).join("") || `<span>Add an amount and the people sharing it.</span>`;
   return { rows, total };
 }
 function setSplitMode(mode) {
@@ -273,6 +278,7 @@ function openFundModal(fund = null, requestedMode = null) {
   byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${(fund ? fund.memberIds.includes(member.id) : defaultPayerId === member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join("");
   byId("itemized-payer").innerHTML = state.members.map(member => `<option value="${member.id}">${escapeHtml(member.nickname || member.name)}</option>`).join("");
   byId("itemized-payer").value = fund?.payerId || defaultPayerId;
+  itemizedGuests = fund?.splitMode === "itemized" ? (fund.guests || []).map(guest => ({ id:guest.id, name:guest.name, guest:true })) : [];
   itemizedDraft = fund?.splitMode === "itemized" && fund.items?.length ? fund.items.map(item => ({ ...item, memberIds:[...item.memberIds] })) : [{ id:newItemId(), name:"", amount:"", memberIds:[defaultPayerId] }];
   renderItemizedRows();
   byId("all-members-caption").textContent = `${state.members.length} people`; byId("fund-modal").hidden = false; setSplitMode(selectedMode); byId("fund-title").focus();
@@ -293,6 +299,21 @@ document.addEventListener("click", event => {
   if (modeButton) { event.preventDefault(); byId("split-choice-modal").hidden = true; return openFundModal(null, modeButton.dataset.newSplitMode); }
   const addItem = event.target.closest("[data-add-item]");
   if (addItem) { event.preventDefault(); try { itemizedDraft = readItemizedRows(); itemizedDraft.push({ id:newItemId(), name:"", amount:"", memberIds:[currentProfile()?.id || ADMIN_MEMBER_ID] }); return renderItemizedRows(); } catch (error) { return showToast(error.message || "Could not add an item."); } }
+  const addGuest = event.target.closest("[data-add-item-guest]");
+  if (addGuest) {
+    event.preventDefault();
+    const name = window.prompt("Guest's name (only for this bill)")?.trim();
+    if (!name) return;
+    if (name.length > 50) return showToast("Keep the guest name under 50 characters.");
+    if ([...state.members, ...itemizedGuests].some(person => person.name.toLowerCase() === name.toLowerCase())) return showToast("That person is already available for this bill.");
+    if (itemizedGuests.length >= 10) return showToast("This bill can include up to 10 guests.");
+    itemizedDraft = readItemizedRows();
+    const guest = { id:`guest-${newItemId()}`, name, guest:true };
+    itemizedGuests.push(guest);
+    const row = addGuest.closest("[data-item-row]"), item = itemizedDraft.find(draft => draft.id === row?.dataset.itemRow);
+    if (item) item.memberIds = [...new Set([...(item.memberIds || []), guest.id])];
+    return renderItemizedRows();
+  }
   const removeItem = event.target.closest("[data-remove-item]");
   if (removeItem) { event.preventDefault(); const row = removeItem.closest("[data-item-row]"); itemizedDraft = readItemizedRows().filter(item => item.id !== row.dataset.itemRow); if (!itemizedDraft.length) itemizedDraft.push({ id:newItemId(), name:"", amount:"", memberIds:[currentProfile()?.id || ADMIN_MEMBER_ID] }); return renderItemizedRows(); }
 });
@@ -304,7 +325,7 @@ byId("fund-form").addEventListener("submit", async event => {
   const isItemized = activeSplitMode === "itemized", items = isItemized ? readItemizedRows() : [], memberIds = isItemized ? [...new Set(items.flatMap(item => item.memberIds))] : [...document.querySelectorAll(".member-choice input:checked")].map(input => input.value);
   if (!memberIds.length) return showToast(isItemized ? "Choose who shares at least one item." : "Select at least one member.");
   if (isItemized && items.some(item => !item.name || !Number.isFinite(item.amount) || item.amount <= 0 || !item.memberIds.length)) return showToast("Complete each item with a name, price, and people sharing it.");
-  const payload = { title:byId("fund-title").value.trim(), description:sanitizeDescriptionHtml(byId("fund-description").innerHTML), date:byId("fund-date").value, total:isItemized ? items.reduce((sum, item) => sum + item.amount, 0) : Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID, splitMode:activeSplitMode, payerId:isItemized ? byId("itemized-payer").value : null, items };
+  const payload = { title:byId("fund-title").value.trim(), description:sanitizeDescriptionHtml(byId("fund-description").innerHTML), date:byId("fund-date").value, total:isItemized ? items.reduce((sum, item) => sum + item.amount, 0) : Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID, splitMode:activeSplitMode, payerId:isItemized ? byId("itemized-payer").value : null, items, guests:isItemized ? itemizedGuests.map(({ id, name }) => ({ id, name })) : [] };
   try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); showToast(message); } catch(error) { showToast(error.message); }
 }, true);
 
@@ -618,7 +639,7 @@ function paymentAuditMarkup(fund) {
   const entries = Array.isArray(fund.paymentAudit) ? [...fund.paymentAudit].reverse() : [];
   if (!entries.length) return `<p class="payment-audit-empty">Payment confirmations will appear here.</p>`;
   return entries.map(entry => {
-    const member = state.members.find(item => item.id === entry.memberId) || { name:"Former member" };
+    const member = fundPerson(fund, entry.memberId);
     const confirmer = state.members.find(item => item.id === entry.confirmedById) || { name:"Unknown profile" };
     const timestamp = new Intl.DateTimeFormat("en-PH", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }).format(new Date(entry.at));
     const action = entry.action === "paid" ? `marked ${Number.isFinite(Number(entry.amount)) ? `${money(entry.amount)} ` : ""}paid via ${escapeHtml(entry.method)}` : `reopened ${Number.isFinite(Number(entry.amount)) ? `${money(entry.amount)} ` : ""}payment`;
@@ -648,7 +669,7 @@ function ensurePaymentConfirmationDialog() {
 
 function openPaymentConfirmation(fund, memberId) {
   ensurePaymentConfirmationDialog();
-  const member = state.members.find(item => item.id === memberId) || { name:"Member" };
+  const member = fundPerson(fund, memberId);
   pendingPayment = { fundId:fund.id, memberId };
   byId("payment-confirm-title").textContent = `Confirm ${member.name}'s payment`;
   byId("payment-confirm-copy").textContent = `${money(memberShare(fund, memberId))} for ${fund.title}. Choose how it was paid; a note is optional.`;
