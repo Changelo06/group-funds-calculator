@@ -1,0 +1,1 @@
+{"name":"splitwise-house","private":true,"version":"1.0.0","scripts":{"start":"node server.js"},"engines":{"node":">=18"}}
