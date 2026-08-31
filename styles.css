@@ -54,3 +54,6 @@
 
 /* Temporary diners belong to this order only, not the permanent member list. */
 .itemized-add-person{margin-top:7px;padding:2px 0;border:0;background:transparent;color:#555;font:600 9px "DM Sans",Arial,sans-serif;text-decoration:underline;text-underline-offset:3px}.itemized-add-person:hover,.itemized-add-person:focus-visible{color:#000;outline:0}.itemized-add-person:focus-visible{text-decoration-thickness:2px}
+
+/* Search and sort share one quiet field on the fund board. */
+.fund-search-controls{width:272px;gap:8px}.fund-search-controls select{flex:0 0 auto;max-width:76px;height:21px;padding:0 0 0 8px;border:0;border-left:1px solid #dedede;outline:0;background:#fff;color:#555;font:600 10px "DM Sans",Arial,sans-serif}@media(max-width:560px){.fund-search-controls{width:100%}.fund-search-controls select{max-width:84px}}
