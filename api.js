@@ -29,9 +29,27 @@ module.exports = async (request, response) => {
   const url = new URL(request.url, "http://localhost");
   const parts = url.pathname.split("/").filter(Boolean);
   const isMembersRoute = parts[0] === "api" && parts[1] === "members";
+  const isPaymentRoute = parts[0] === "api" && parts[1] === "funds" && parts[2] && parts[3] === "payments" && request.method === "PATCH";
   if (url.pathname === "/api/members" && request.method === "POST") return sendJson(response, 405, { error:"This group uses five fixed member accounts." });
   const isSingleMember = isMembersRoute && parts[2] && parts.length === 3;
   if (isSingleMember && request.method === "DELETE") return sendJson(response, 405, { error:"The five member accounts cannot be removed." });
+  if (isPaymentRoute) {
+    try {
+      const state = await readState(), fund = state.funds.find(item => item.id === parts[2]);
+      if (!fund) return sendJson(response, 404, { error:"Split fund not found." });
+      const input = await body(request), memberId = String(input.memberId || ""), confirmedById = state.members.some(member => member.id === input.confirmedById) ? input.confirmedById : "member-1", paid = Boolean(input.paid), method = String(input.method || "").toLowerCase(), note = String(input.note || "").trim();
+      if (!fund.memberIds.includes(memberId)) throw new Error("That member is not part of this fund.");
+      if (fund.splitMode === "itemized" && fund.payerId === memberId) throw new Error("The payer already covered their own itemized share.");
+      if (paid && !["cash", "online"].includes(method)) throw new Error("Choose cash or online before confirming payment.");
+      if (note.length > 300) throw new Error("Keep the payment note under 300 characters.");
+      fund.payments ||= {}; fund.paymentAudit ||= [];
+      const at = new Date().toISOString(), amount = Number(fund.shares?.[memberId] ?? Number(fund.total) / Math.max(1, fund.memberIds.length));
+      if (paid) { fund.payments[memberId] = { paidAt:at, method, note, confirmedById, amount }; fund.paymentAudit.push({ id:crypto.randomUUID(), action:"paid", memberId, method, note, confirmedById, amount, at }); }
+      else { delete fund.payments[memberId]; fund.paymentAudit.push({ id:crypto.randomUUID(), action:"unpaid", memberId, confirmedById, amount, at }); }
+      fund.updatedAt = at;
+      return sendJson(response, 200, await writeState(state));
+    } catch (error) { return sendJson(response, 400, { error:error.message || "Something went wrong." }); }
+  }
   const supportsMemberDetails = isSingleMember && request.method === "PATCH";
   if (!supportsMemberDetails) return originalApiHandler(request, response);
   try {
@@ -52,13 +70,30 @@ module.exports = async (request, response) => {
 };
 
 function validFund(input, members) {
-  const title = String(input.title || "").trim(), description = String(input.description || "").trim().replace(/<(?!\/?(?:b|strong|i|em|ul|ol|li|p|br)\b)[^>]*>/gi, "").replace(/<(b|strong|i|em|ul|ol|li|p|br)(?:\s[^>]*)?>/gi, "<$1>").replace(/<\/(b|strong|i|em|ul|ol|li|p)>/gi, "</$1>"), date = String(input.date || ""), total = Number(input.total), receipt = input.receipt == null ? null : String(input.receipt);
+  const title = String(input.title || "").trim(), description = String(input.description || "").trim().replace(/<(?!\/?(?:b|strong|i|em|ul|ol|li|p|br)\b)[^>]*>/gi, "").replace(/<(b|strong|i|em|ul|ol|li|p|br)(?:\s[^>]*)?>/gi, "<$1>").replace(/<\/(b|strong|i|em|ul|ol|li|p)>/gi, "</$1>"), date = String(input.date || ""), receipt = input.receipt == null ? null : String(input.receipt), splitMode = input.splitMode === "itemized" ? "itemized" : "equal";
   const ids = [...new Set(Array.isArray(input.memberIds) ? input.memberIds.filter(id => typeof id === "string") : [])].filter(id => members.some(member => member.id === id));
   if (!title) throw new Error("A fund title is required.");
   if (title.length > 80 || description.length > 1200) throw new Error("Please shorten the title or description.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Choose a valid date.");
+  if (receipt && (!/^data:image\/(png|jpeg|webp);base64,/i.test(receipt) || receipt.length > 900000)) throw new Error("Choose a smaller PNG, JPEG, or WebP receipt image.");
+  if (splitMode === "itemized") {
+    const payerId = String(input.payerId || ""), rawItems = Array.isArray(input.items) ? input.items.slice(0, 40) : [], sharesInCents = {}, itemIds = new Set();
+    if (!members.some(member => member.id === payerId)) throw new Error("Choose the member who paid the bill.");
+    if (!rawItems.length) throw new Error("Add at least one item or shared charge.");
+    const items = rawItems.map((item, index) => {
+      const name = String(item.name || "").trim(), amountInCents = Math.round(Number(item.amount) * 100), memberIds = [...new Set(Array.isArray(item.memberIds) ? item.memberIds.filter(id => typeof id === "string") : [])].filter(id => members.some(member => member.id === id));
+      if (!name || name.length > 80) throw new Error(`Name item ${index + 1} with up to 80 characters.`);
+      if (!Number.isSafeInteger(amountInCents) || amountInCents <= 0) throw new Error(`Enter a valid amount for ${name}.`);
+      if (!memberIds.length) throw new Error(`Choose who shares ${name}.`);
+      const shareInCents = Math.floor(amountInCents / memberIds.length), remainder = amountInCents % memberIds.length;
+      memberIds.forEach((memberId, memberIndex) => { sharesInCents[memberId] = (sharesInCents[memberId] || 0) + shareInCents + (memberIndex < remainder ? 1 : 0); });
+      return { id:typeof item.id === "string" && item.id ? item.id.slice(0, 80) : crypto.randomUUID(), name, amount:amountInCents / 100, memberIds };
+    });
+    const memberIds = Object.keys(sharesInCents), totalInCents = items.reduce((sum, item) => sum + Math.round(item.amount * 100), 0), shares = Object.fromEntries(memberIds.map(memberId => [memberId, sharesInCents[memberId] / 100]));
+    return { title, description, date, total:totalInCents / 100, memberIds, receipt, splitMode, payerId, items, shares };
+  }
+  const total = Number(input.total);
   if (!Number.isFinite(total) || total <= 0) throw new Error("Enter a total greater than zero.");
   if (!ids.length) throw new Error("Select at least one current member.");
-  if (receipt && (!/^data:image\/(png|jpeg|webp);base64,/i.test(receipt) || receipt.length > 900000)) throw new Error("Choose a smaller PNG, JPEG, or WebP receipt image.");
-  return { title, description, date, total:Math.round(total * 100) / 100, memberIds:ids, receipt };
+  return { title, description, date, total:Math.round(total * 100) / 100, memberIds:ids, receipt, splitMode:"equal", payerId:null, items:[], shares:{} };
 }

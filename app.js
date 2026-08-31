@@ -8,9 +8,11 @@ const dateLabel = date => new Intl.DateTimeFormat("en-PH", { month:"short", day:
 const initials = name => name.split(/\s+/).slice(0,2).map(part => part[0]).join("").toUpperCase();
 const escapeHtml = value => String(value || "").replace(/[&<'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
 const fundPeople = fund => fund.memberIds.map(id => state.members.find(member => member.id === id) || { id, name:"Former member" });
-const paidCount = fund => fund.memberIds.filter(id => fund.payments?.[id]).length;
+const payableMemberIds = fund => fund.memberIds.filter(id => !(fund.splitMode === "itemized" && fund.payerId === id));
+const paidCount = fund => payableMemberIds(fund).filter(id => fund.payments?.[id]).length;
 const share = fund => Number(fund.total) / Math.max(1, fund.memberIds.length);
-const settled = fund => fund.memberIds.length > 0 && paidCount(fund) === fund.memberIds.length;
+const memberShare = (fund, memberId) => Number(fund.shares?.[memberId] ?? share(fund));
+const settled = fund => payableMemberIds(fund).length === 0 || paidCount(fund) === payableMemberIds(fund).length;
 const openFunds = () => state.funds.filter(fund => !settled(fund));
 const postedAt = fund => String(fund.createdAt || fund.updatedAt || `${fund.date || ""}T12:00:00`);
 const postedAge = fund => { const date = new Date(postedAt(fund)); if (Number.isNaN(date.getTime())) return "recently"; const days = Math.max(0, Math.floor((Date.now() - date.getTime()) / 86400000)); return days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`; };
@@ -22,12 +24,12 @@ async function loadState(silent = false) { try { const [nextState, health] = awa
 function legacy_render_1() { renderNavigation(); renderOverview(); renderFunds(); renderMembers(); if (activeFundId) renderDetail(); }
 function legacy_renderNavigation_1() { byId("open-nav-count").textContent = openFunds().length; document.querySelectorAll(".nav-link, .tab-link").forEach(link => link.classList.toggle("active", link.dataset.route === activeRoute)); }
 function legacy_fundsHtml_1(funds, emptyTitle, emptyCopy) { if (!funds.length) return `<div class="empty-state"><b>${emptyTitle}</b>${emptyCopy}<br><button class="primary-button" type="button" data-open-fund>＋ Add split fund</button></div>`; return funds.map(fund => { const count = paidCount(fund), people = fund.memberIds.length, done = settled(fund), percent = people ? count / people * 100 : 0; return `<button class="fund-row" data-fund-id="${fund.id}" type="button"><span class="fund-icon">${fund.icon || "◈"}</span><span class="fund-copy"><strong>${escapeHtml(fund.title)}</strong><small>${escapeHtml(fund.description || "No description")}</small></span><span class="fund-meta"><b>${dateLabel(fund.date)}</b>${people} member${people === 1 ? "" : "s"}</span><span class="payment-progress"><span class="progress-caption"><span>${count}/${people} paid</span><b>${Math.round(percent)}%</b></span><span class="progress"><i style="width:${percent}%"></i></span></span><span class="fund-amount">${money(fund.total)}</span><span class="status-pill ${done ? "settled" : ""}">${done ? "Settled" : "Open"}</span><span class="row-arrow">›</span></button>`; }).join(""); }
-function renderOverview() { const open = openFunds(), openTotal = open.reduce((sum,fund) => sum + Number(fund.total),0), awaiting = open.reduce((sum,fund) => sum + fund.memberIds.length - paidCount(fund),0), done = state.funds.filter(settled).length; byId("stat-grid").innerHTML = [["Open to collect",money(openTotal),`${open.length} open fund${open.length === 1 ? "" : "s"}`,"open"],["Payments awaiting",awaiting,awaiting ? "Mark payments as they come in" : "Everyone is up to date",awaiting ? "open":"ok"],["Fully settled",done,`${state.funds.length} total split fund${state.funds.length === 1 ? "" : "s"}`,"ok"]].map(([label,value,caption,kind]) => `<article class="stat-card"><span>${label}</span><strong>${value}</strong><small class="${kind}">${caption}</small></article>`).join(""); byId("recent-funds").innerHTML = fundsHtml(sortFunds(state.funds).slice(0,4), "No split funds yet", "Add your first shared purchase to get started."); }
+function renderOverview() { const open = openFunds(), openTotal = open.reduce((sum,fund) => sum + Number(fund.total),0), awaiting = open.reduce((sum,fund) => sum + payableMemberIds(fund).length - paidCount(fund),0), done = state.funds.filter(settled).length; byId("stat-grid").innerHTML = [["Open to collect",money(openTotal),`${open.length} open fund${open.length === 1 ? "" : "s"}`,"open"],["Payments awaiting",awaiting,awaiting ? "Mark payments as they come in" : "Everyone is up to date",awaiting ? "open":"ok"],["Fully settled",done,`${state.funds.length} total split fund${state.funds.length === 1 ? "" : "s"}`,"ok"]].map(([label,value,caption,kind]) => `<article class="stat-card"><span>${label}</span><strong>${value}</strong><small class="${kind}">${caption}</small></article>`).join(""); byId("recent-funds").innerHTML = fundsHtml(sortFunds(state.funds).slice(0,4), "No split funds yet", "Add your first shared purchase to get started."); }
 function renderFunds() { const all = state.funds, open = all.filter(fund => !settled(fund)), closed = all.filter(settled); byId("all-count").textContent = all.length; byId("open-count").textContent = open.length; byId("settled-count").textContent = closed.length; byId("fund-sort").value = activeSort; const query = byId("fund-search").value.trim().toLowerCase(); let funds = activeFilter === "open" ? open : activeFilter === "settled" ? closed : all; if (query) funds = funds.filter(fund => `${fund.title} ${fund.description || ""}`.toLowerCase().includes(query)); byId("funds-list").innerHTML = fundsHtml(sortFunds(funds), query ? "No matching funds" : "No funds in this view", query ? "Try another word or clear the search." : "Create a split fund to start tracking the house expenses."); document.querySelectorAll(".filter").forEach(button => button.classList.toggle("active", button.dataset.filter === activeFilter)); }
 function legacy_renderMembers_1() { byId("member-total").textContent = `${state.members.length} house member${state.members.length === 1 ? "" : "s"}`; byId("members-list").innerHTML = state.members.map(member => `<article class="member-card"><span class="avatar">${initials(member.name)}</span><span><b>${escapeHtml(member.name)}</b><small>${memberFundCount(member.id)} split fund${memberFundCount(member.id) === 1 ? "" : "s"}</small></span><button type="button" data-delete-member="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">×</button></article>`).join("") || `<div class="empty-state"><b>No members yet</b>Add your housemates before creating a fund.</div>`; }
 const memberFundCount = id => state.funds.filter(fund => fund.memberIds.includes(id)).length;
 function legacy_showRoute_1(route) { activeRoute = route; ["overview","funds","members"].forEach(name => byId(`${name}-view`).hidden = name !== route); if (window.location.hash.slice(1) !== route) window.location.hash = route; renderNavigation(); if(route === "funds") renderFunds(); }
-function updateFundPreview() { const selected = document.querySelectorAll(".member-choice input:checked").length, total = Number(byId("fund-total").value) || 0; byId("per-person-preview").innerHTML = `${money(selected ? total / selected : 0)} <small>each</small>`; byId("select-all-members").checked = state.members.length > 0 && selected === state.members.length; const note = byId("selection-note"); note.textContent = selected ? `${selected} member${selected === 1 ? "" : "s"} selected · ${money(total / selected)} each` : "Select at least one person to continue."; note.classList.toggle("ready", Boolean(selected)); document.querySelectorAll(".member-choice").forEach(item => item.classList.toggle("selected", item.querySelector("input").checked)); }
+function updateFundPreview() { if (activeSplitMode === "itemized" && byId("itemized-editor")) { updateItemizedSummary(); return; } const selected = document.querySelectorAll(".member-choice input:checked").length, total = Number(byId("fund-total").value) || 0; byId("per-person-preview").innerHTML = `${money(selected ? total / selected : 0)} <small>each</small>`; byId("select-all-members").checked = state.members.length > 0 && selected === state.members.length; const note = byId("selection-note"); note.textContent = selected ? `${selected} member${selected === 1 ? "" : "s"} selected · ${money(total / selected)} each` : "Select at least one person to continue."; note.classList.toggle("ready", Boolean(selected)); document.querySelectorAll(".member-choice").forEach(item => item.classList.toggle("selected", item.querySelector("input").checked)); }
 function refreshFundMemberChoices(includeMemberId) { const selected = new Set([...document.querySelectorAll(".member-choice input:checked")].map(input => input.value)); if (includeMemberId) selected.add(includeMemberId); byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${selected.has(member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join(""); byId("all-members-caption").textContent = `${state.members.length} people`; updateFundPreview(); }
 function renderReceiptPreview() { const preview = byId("receipt-preview"); preview.hidden = !currentReceipt; if (currentReceipt) byId("receipt-image").src = currentReceipt; }
 function legacy_openFundModal_1(fund = null) { editingFundId = fund?.id || null; currentReceipt = fund?.receipt || null; calculatorExpression = ""; byId("calculator-display").textContent = "0"; byId("receipt-input").value = ""; renderReceiptPreview(); byId("fund-modal-eyebrow").textContent = fund ? "EDIT SPLIT FUND" : "NEW SPLIT FUND"; byId("fund-modal-title").textContent = fund ? "Edit split fund" : "Add a split fund"; byId("save-fund-button").textContent = fund ? "Save changes" : "Create split fund"; byId("fund-title").value = fund?.title || ""; byId("fund-description").value = fund?.description || ""; byId("fund-date").value = fund?.date || new Date().toISOString().slice(0,10); byId("fund-total").value = fund?.total || ""; byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${fund?.memberIds.includes(member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join(""); byId("all-members-caption").textContent = `${state.members.length} people`; byId("fund-modal").hidden = false; updateFundPreview(); byId("fund-title").focus(); }
@@ -52,8 +54,8 @@ let currentMemberId = localStorage.getItem(PROFILE_STORAGE_KEY) || "";
 const currentProfile = () => state.members.find(member => member.id === currentMemberId) || null;
 const fundCreatorId = fund => fund.createdById || "member-1";
 const memberFunds = memberId => state.funds.filter(fund => fund.memberIds.includes(memberId));
-const memberUnpaidFunds = memberId => memberFunds(memberId).filter(fund => !fund.payments?.[memberId]);
-const memberOwed = memberId => memberUnpaidFunds(memberId).reduce((total, fund) => total + share(fund), 0);
+const memberUnpaidFunds = memberId => memberFunds(memberId).filter(fund => payableMemberIds(fund).includes(memberId) && !fund.payments?.[memberId]);
+const memberOwed = memberId => memberUnpaidFunds(memberId).reduce((total, fund) => total + memberShare(fund, memberId), 0);
 
 function renderNavigation() {
   byId("open-nav-count").textContent = openFunds().length;
@@ -68,7 +70,8 @@ function legacy_renderProfileChrome_1() {
 }
 
 function profileFundHtml(fund) {
-  return `<article class="personal-fund"><span class="personal-fund-icon">${fund.icon || "◈"}</span><span><b>${escapeHtml(fund.title)}</b><small>${dateLabel(fund.date)} · ${money(share(fund))} your share</small></span><strong>${money(share(fund))}</strong></article>`;
+  const amount = memberShare(fund, currentProfile()?.id);
+  return `<article class="personal-fund"><span class="personal-fund-icon">${fund.icon || "◈"}</span><span><b>${escapeHtml(fund.title)}</b><small>${dateLabel(fund.date)} · ${money(amount)} your share</small></span><strong>${money(amount)}</strong></article>`;
 }
 
 function legacy_renderMore_1() {
@@ -207,18 +210,72 @@ function installDescriptionEditor() {
   field.append(toolbar, editor);
 }
 
-function openFundModal(fund = null) {
+let activeSplitMode = "equal", itemizedDraft = [];
+const newItemId = () => (typeof globalThis !== "undefined" && globalThis.crypto?.randomUUID?.()) || `item-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function ensureItemizedEditor() {
+  if (byId("itemized-editor")) return;
+  const editor = document.createElement("section");
+  editor.id = "itemized-editor";
+  editor.className = "itemized-editor";
+  editor.hidden = true;
+  editor.innerHTML = `<div class="itemized-header"><div><b>Order items</b><small>Add dishes, drinks, tax, delivery, or any shared charge.</small></div><label><span>Paid by</span><select id="itemized-payer"></select></label></div><div id="itemized-rows"></div><button class="secondary-button itemized-add" type="button" data-add-item>＋ Add item or charge</button><div class="itemized-summary"><span>Itemized total</span><strong id="itemized-total">₱0.00</strong><div id="itemized-breakdown"></div></div>`;
+  document.querySelector(".receipt-field").before(editor);
+}
+function itemizedRowHtml(item, index) {
+  const selected = new Set(item.memberIds || []);
+  return `<article class="itemized-row" data-item-row="${escapeHtml(item.id)}"><div class="itemized-row-top"><label><span>Item ${index + 1}</span><input data-item-name maxlength="80" value="${escapeHtml(item.name || "")}" placeholder="e.g. Chicken rice" /></label><label class="itemized-price"><span>Price</span><div class="money-input"><b>₱</b><input data-item-amount type="number" min="0.01" step="0.01" value="${item.amount || ""}" placeholder="0.00" /></div></label><button type="button" class="itemized-remove" data-remove-item aria-label="Remove item">×</button></div><fieldset><legend>Who ordered this?</legend><div class="itemized-members">${state.members.map(member => `<label><input type="checkbox" data-item-member value="${member.id}" ${selected.has(member.id) ? "checked" : ""}/><span>${escapeHtml(member.nickname || member.name)}</span></label>`).join("")}</div></fieldset></article>`;
+}
+function readItemizedRows() {
+  return [...document.querySelectorAll("[data-item-row]")].map(row => ({ id:row.dataset.itemRow, name:row.querySelector("[data-item-name]").value.trim(), amount:Number(row.querySelector("[data-item-amount]").value), memberIds:[...row.querySelectorAll("[data-item-member]:checked")].map(input => input.value) }));
+}
+function renderItemizedRows() {
+  byId("itemized-rows").innerHTML = itemizedDraft.map(itemizedRowHtml).join("");
+  updateFundPreview();
+}
+function updateItemizedSummary() {
+  const totals = {}, rows = readItemizedRows().filter(item => Number.isFinite(item.amount) && item.amount > 0 && item.memberIds.length), total = rows.reduce((sum, item) => sum + item.amount, 0);
+  rows.forEach(item => { const cents = Math.round(item.amount * 100), base = Math.floor(cents / item.memberIds.length), remainder = cents % item.memberIds.length; item.memberIds.forEach((memberId, index) => { totals[memberId] = (totals[memberId] || 0) + base + (index < remainder ? 1 : 0); }); });
+  byId("itemized-total").textContent = money(total);
+  byId("itemized-breakdown").innerHTML = Object.entries(totals).map(([memberId, cents]) => `<span>${escapeHtml((state.members.find(member => member.id === memberId) || { name:"Former member" }).nickname || (state.members.find(member => member.id === memberId) || { name:"Former member" }).name)} <b>${money(cents / 100)}</b></span>`).join("") || `<span>Add an amount and the people sharing it.</span>`;
+  return { rows, total };
+}
+function setSplitMode(mode) {
+  activeSplitMode = mode === "itemized" ? "itemized" : "equal";
+  byId("fund-form").dataset.splitMode = activeSplitMode;
+  byId("itemized-editor").hidden = activeSplitMode !== "itemized";
+  document.querySelector(".fund-tools").hidden = activeSplitMode === "itemized";
+  document.querySelector(".member-selector").hidden = activeSplitMode === "itemized";
+  byId("fund-total").disabled = activeSplitMode === "itemized";
+  updateFundPreview();
+}
+
+function ensureSplitChoiceModal() {
+  if (byId("split-choice-modal")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop split-choice-backdrop" id="split-choice-modal" hidden><section class="modal split-choice-card" aria-labelledby="split-choice-title"><button class="close-button" type="button" data-close-modal aria-label="Close">×</button><p class="eyebrow">NEW GROUP FUND</p><h2 id="split-choice-title">How should this bill be split?</h2><p>Choose the calculation method before adding the details.</p><div class="split-choice-grid"><button type="button" data-new-split-mode="equal"><span>÷</span><b>Equal split</b><small>One total divided equally among the selected members.</small></button><button type="button" data-new-split-mode="itemized"><span>≡</span><b>Itemized order</b><small>Assign each dish, item, or charge to the people who share it.</small></button></div></section></div>`);
+}
+function openSplitChoice() {
+  ensureSplitChoiceModal();
+  byId("split-choice-modal").hidden = false;
+}
+function openFundModal(fund = null, requestedMode = null) {
+  if (!fund && !requestedMode) return openSplitChoice();
   installDescriptionEditor();
+  ensureItemizedEditor();
   editingFundId = fund?.id || null; currentReceipt = fund?.receipt || null; calculatorExpression = "";
   byId("calculator-display").textContent = "0"; byId("receipt-input").value = ""; renderReceiptPreview();
-  byId("fund-modal-eyebrow").textContent = fund ? "EDIT SPLIT FUND" : "NEW SPLIT FUND";
-  byId("fund-modal-title").textContent = fund ? "Edit split fund" : "Add a split fund";
+  const selectedMode = requestedMode || fund?.splitMode || "equal";
+  byId("fund-modal-eyebrow").textContent = fund ? "EDIT SPLIT FUND" : selectedMode === "itemized" ? "ITEMIZED ORDER" : "EQUAL SPLIT";
+  byId("fund-modal-title").textContent = fund ? "Edit split fund" : selectedMode === "itemized" ? "Add an itemized order" : "Add an equal split";
   byId("save-fund-button").textContent = fund ? "Save changes" : "Create split fund";
   byId("fund-title").value = fund?.title || ""; byId("fund-description").innerHTML = sanitizeDescriptionHtml(fund?.description || "");
   byId("fund-date").value = fund?.date || new Date().toISOString().slice(0,10); byId("fund-total").value = fund?.total || "";
   const defaultPayerId = currentProfile()?.id || ADMIN_MEMBER_ID;
   byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${(fund ? fund.memberIds.includes(member.id) : defaultPayerId === member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join("");
-  byId("all-members-caption").textContent = `${state.members.length} people`; byId("fund-modal").hidden = false; updateFundPreview(); byId("fund-title").focus();
+  byId("itemized-payer").innerHTML = state.members.map(member => `<option value="${member.id}">${escapeHtml(member.nickname || member.name)}</option>`).join("");
+  byId("itemized-payer").value = fund?.payerId || defaultPayerId;
+  itemizedDraft = fund?.splitMode === "itemized" && fund.items?.length ? fund.items.map(item => ({ ...item, memberIds:[...item.memberIds] })) : [{ id:newItemId(), name:"", amount:"", memberIds:[defaultPayerId] }];
+  renderItemizedRows();
+  byId("all-members-caption").textContent = `${state.members.length} people`; byId("fund-modal").hidden = false; setSplitMode(selectedMode); byId("fund-title").focus();
 }
 
 document.addEventListener("mousedown", event => {
@@ -231,21 +288,33 @@ document.addEventListener("click", event => {
   document.execCommand(button.dataset.descriptionFormat, false, null);
 });
 
+document.addEventListener("click", event => {
+  const modeButton = event.target.closest("[data-new-split-mode]");
+  if (modeButton) { event.preventDefault(); byId("split-choice-modal").hidden = true; return openFundModal(null, modeButton.dataset.newSplitMode); }
+  const addItem = event.target.closest("[data-add-item]");
+  if (addItem) { event.preventDefault(); try { itemizedDraft = readItemizedRows(); itemizedDraft.push({ id:newItemId(), name:"", amount:"", memberIds:[currentProfile()?.id || ADMIN_MEMBER_ID] }); return renderItemizedRows(); } catch (error) { return showToast(error.message || "Could not add an item."); } }
+  const removeItem = event.target.closest("[data-remove-item]");
+  if (removeItem) { event.preventDefault(); const row = removeItem.closest("[data-item-row]"); itemizedDraft = readItemizedRows().filter(item => item.id !== row.dataset.itemRow); if (!itemizedDraft.length) itemizedDraft.push({ id:newItemId(), name:"", amount:"", memberIds:[currentProfile()?.id || ADMIN_MEMBER_ID] }); return renderItemizedRows(); }
+});
+document.addEventListener("input", event => { if (event.target.matches("[data-item-name], [data-item-amount]")) updateFundPreview(); });
+document.addEventListener("change", event => { if (event.target.matches("[data-item-member]")) updateFundPreview(); });
+
 byId("fund-form").addEventListener("submit", async event => {
   event.preventDefault(); event.stopImmediatePropagation();
-  const memberIds = [...document.querySelectorAll(".member-choice input:checked")].map(input => input.value);
-  if (!memberIds.length) return showToast("Select at least one member.");
-  const payload = { title:byId("fund-title").value.trim(), description:sanitizeDescriptionHtml(byId("fund-description").innerHTML), date:byId("fund-date").value, total:Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID };
+  const isItemized = activeSplitMode === "itemized", items = isItemized ? readItemizedRows() : [], memberIds = isItemized ? [...new Set(items.flatMap(item => item.memberIds))] : [...document.querySelectorAll(".member-choice input:checked")].map(input => input.value);
+  if (!memberIds.length) return showToast(isItemized ? "Choose who shares at least one item." : "Select at least one member.");
+  if (isItemized && items.some(item => !item.name || !Number.isFinite(item.amount) || item.amount <= 0 || !item.memberIds.length)) return showToast("Complete each item with a name, price, and people sharing it.");
+  const payload = { title:byId("fund-title").value.trim(), description:sanitizeDescriptionHtml(byId("fund-description").innerHTML), date:byId("fund-date").value, total:isItemized ? items.reduce((sum, item) => sum + item.amount, 0) : Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID, splitMode:activeSplitMode, payerId:isItemized ? byId("itemized-payer").value : null, items };
   try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); showToast(message); } catch(error) { showToast(error.message); }
 }, true);
 
 function renderDetail() {
   const fund = state.funds.find(item => item.id === activeFundId); if (!fund) return closeModals();
-  const people = fundPeople(fund), count = paidCount(fund); byId("detail-date").textContent = `${dateLabel(fund.date)} · SPLIT FUND`; byId("detail-title").textContent = fund.title;
+  const people = fundPeople(fund).filter(person => payableMemberIds(fund).includes(person.id)), count = paidCount(fund), payer = state.members.find(member => member.id === fund.payerId); byId("detail-date").textContent = `${dateLabel(fund.date)} · ${fund.splitMode === "itemized" ? "ITEMIZED ORDER" : "SPLIT FUND"}`; byId("detail-title").textContent = fund.title;
   byId("detail-description").innerHTML = sanitizeDescriptionHtml(fund.description) || "No description added.";
-  byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${people.length} paid`;
+  byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = fund.splitMode === "itemized" ? `Itemized · paid by ${payer?.nickname || payer?.name || "a member"}` : `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${people.length} paid`;
   byId("detail-receipt").hidden = !fund.receipt; if (fund.receipt) byId("detail-receipt-image").src = fund.receipt;
-  byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(share(fund))} share</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false;
+  byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]), amount = memberShare(fund, person.id); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(amount)} ${fund.splitMode === "itemized" ? `owed to ${escapeHtml(payer?.nickname || payer?.name || "payer")}` : "share"}</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false;
 }
 
 installDescriptionEditor();
@@ -492,7 +561,7 @@ document.addEventListener("click", async event => {
 function fundsHtml(funds, emptyTitle, emptyCopy) {
   if (!funds.length) return `<div class="empty-state"><b>${emptyTitle}</b>${emptyCopy}<br><button class="primary-button" type="button" data-open-fund>＋ Add split fund</button></div>`;
   return funds.map(fund => {
-    const count = paidCount(fund), people = fund.memberIds.length, done = settled(fund), remaining = Math.max(0, people - count);
+    const count = paidCount(fund), people = payableMemberIds(fund).length, done = settled(fund), remaining = Math.max(0, people - count);
     const summary = done ? "Settled" : `${remaining} ${remaining === 1 ? "person" : "people"} still to pay`;
     const mine = fundCreatorId(fund) === currentProfile()?.id; return `<button class="fund-row ${mine ? "posted-by-you" : ""}" data-fund-id="${fund.id}" type="button"><span class="fund-icon">${fund.icon || "◈"}</span><span class="fund-copy"><strong>${escapeHtml(fund.title)}</strong><small>Posted ${postedAge(fund)} · ${mine ? "Posted by you · " : ""}${summary} · ${count}/${people} paid</small></span><span class="fund-meta"><b>${dateLabel(fund.date)}</b>${people} member${people === 1 ? "" : "s"}</span><span class="payment-progress"><span class="progress-caption"><span>${count}/${people} paid</span><b>${Math.round(people ? count / people * 100 : 0)}%</b></span><span class="progress"><i style="width:${people ? count / people * 100 : 0}%"></i></span></span><span class="fund-amount">${money(fund.total)}</span><span class="status-pill ${done ? "settled" : ""}">${done ? "Settled" : "Open"}</span><span class="row-arrow">›</span></button>`;
   }).join("");
@@ -552,7 +621,7 @@ function paymentAuditMarkup(fund) {
     const member = state.members.find(item => item.id === entry.memberId) || { name:"Former member" };
     const confirmer = state.members.find(item => item.id === entry.confirmedById) || { name:"Unknown profile" };
     const timestamp = new Intl.DateTimeFormat("en-PH", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }).format(new Date(entry.at));
-    const action = entry.action === "paid" ? `marked paid via ${escapeHtml(entry.method)}` : "reopened the payment";
+    const action = entry.action === "paid" ? `marked ${Number.isFinite(Number(entry.amount)) ? `${money(entry.amount)} ` : ""}paid via ${escapeHtml(entry.method)}` : `reopened ${Number.isFinite(Number(entry.amount)) ? `${money(entry.amount)} ` : ""}payment`;
     const note = entry.note ? `<small>${escapeHtml(entry.note)}</small>` : "";
     return `<article class="payment-audit-row"><span><b>${escapeHtml(member.name)}</b> ${action}</span><span>by ${escapeHtml(confirmer.name)} · ${timestamp}</span>${note}</article>`;
   }).join("");
@@ -582,7 +651,7 @@ function openPaymentConfirmation(fund, memberId) {
   const member = state.members.find(item => item.id === memberId) || { name:"Member" };
   pendingPayment = { fundId:fund.id, memberId };
   byId("payment-confirm-title").textContent = `Confirm ${member.name}'s payment`;
-  byId("payment-confirm-copy").textContent = `${money(share(fund))} for ${fund.title}. Choose how it was paid; a note is optional.`;
+  byId("payment-confirm-copy").textContent = `${money(memberShare(fund, memberId))} for ${fund.title}. Choose how it was paid; a note is optional.`;
   document.querySelectorAll('input[name="payment-method"]').forEach(input => input.checked = false);
   byId("payment-confirm-note").value = "";
   byId("payment-confirm-modal").hidden = false;
