@@ -39,7 +39,7 @@ byId("fund-form").addEventListener("submit", async event => { event.preventDefau
 byId("member-form").addEventListener("submit", async event => { event.preventDefault(); const name = byId("member-name").value.trim(); try { state = await api("/api/members", {method:"POST",body:JSON.stringify({name})}); const newMember = state.members.at(-1); byId("member-modal").hidden = true; render(); if (!byId("fund-modal").hidden) refreshFundMemberChoices(newMember?.id); showToast(`${name} was added.`); } catch(error) { showToast(error.message); } });
 byId("edit-fund").addEventListener("click", () => { const fund = state.funds.find(item => item.id === activeFundId); byId("detail-modal").hidden = true; openFundModal(fund); });
 byId("delete-fund").addEventListener("click", async () => { const fund = state.funds.find(item => item.id === activeFundId); if (!confirm(`Delete “${fund.title}”? This cannot be undone.`)) return; try { state = await api(`/api/funds/${fund.id}`, {method:"DELETE"}); closeModals(); render(); showToast("Split fund deleted."); } catch(error) { showToast(error.message); } });
-window.addEventListener("hashchange", () => { const route = location.hash.slice(1); if (["overview","funds","members"].includes(route) && route !== activeRoute) showRoute(route); });
+window.addEventListener("hashchange", () => { const route = location.hash.slice(1); if (["overview","funds","members","more"].includes(route) && route !== activeRoute) showRoute(route); });
 const initialRoute = location.hash.slice(1); if (["overview","funds","members","more"].includes(initialRoute)) activeRoute = initialRoute; showRoute(activeRoute); loadState(); setInterval(() => loadState(true), 60000);
 
 // A profile is a lightweight, device-local selection—not a password account.
@@ -380,6 +380,7 @@ function openMemberModal(member = null) {
   byId("member-modal").querySelector(".eyebrow").textContent = member ? "EDIT MEMBER" : "NEW MEMBER";
   byId("member-modal").querySelector("h2").textContent = member ? `Edit ${member.name}` : "Add someone to Group Funds Calculator";
   byId("member-name").value = member?.name || "";
+  byId("member-name").readOnly = Boolean(member);
   byId("member-nickname").value = member?.nickname || "";
   byId("member-label").value = member?.label || "";
   byId("member-contact").value = member?.contact || "";
@@ -400,6 +401,12 @@ document.addEventListener("click", event => {
   if (!editButton) return;
   const member = state.members.find(item => item.id === editButton.dataset.editMember);
   if (member) openMemberModal(member);
+});
+
+document.addEventListener("click", event => {
+  if (!event.target.closest("[data-edit-current-profile]")) return;
+  const profile = currentProfile();
+  if (profile) openMemberModal(profile);
 });
 
 byId("member-form").addEventListener("submit", async event => {
@@ -457,7 +464,7 @@ function renderMore() {
   const profile = currentProfile(), unpaid = profile ? memberUnpaidFunds(profile.id) : [], owed = profile ? memberOwed(profile.id) : 0;
   byId("tracker-title").textContent = profile ? `${profile.nickname || profile.name}'s tracker` : "My payments";
   byId("tracker-subheading").textContent = profile ? "Your payment status and public payment details, in one place." : "Choose a member profile to see a personal tracker.";
-  byId("profile-summary").innerHTML = profile ? `<span class="avatar">${accountAvatarContent(profile)}</span><span><b>${escapeHtml(profile.nickname || profile.name)}</b><small>${unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"} · ${money(owed)} to pay` : "You are all caught up"}</small></span><span class="profile-summary-actions"><button type="button" data-view-payment-profile="${profile.id}">Payment profile</button><button type="button" data-open-profile>Switch</button></span>` : `<span class="avatar">?</span><span><b>No member selected</b><small>Select who is using this device to see their tracker.</small></span><button type="button" data-open-profile>Choose</button>`;
+  byId("profile-summary").innerHTML = profile ? `<span class="avatar">${accountAvatarContent(profile)}</span><span><b>${escapeHtml(profile.nickname || profile.name)}</b><small>${unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"} · ${money(owed)} to pay` : "You are all caught up"}</small></span><span class="profile-summary-actions"><button type="button" data-edit-current-profile>Edit my details</button><button type="button" data-view-payment-profile="${profile.id}">Payment profile</button><button type="button" data-open-profile>Switch</button></span>` : `<span class="avatar">?</span><span><b>No member selected</b><small>Select who is using this device to see their tracker.</small></span><button type="button" data-open-profile>Choose</button>`;
   byId("unpaid-count").textContent = unpaid.length;
   byId("personal-unpaid-list").innerHTML = unpaid.length ? unpaid.map(profileFundHtml).join("") : `<div class="empty-state"><b>${profile ? "All caught up" : "Choose a member"}</b>${profile ? "There are no unpaid split funds for this profile." : "Select a profile to see personal payment reminders."}</div>`;
   byId("member-status-list").innerHTML = state.members.map(member => { const awaiting = memberUnpaidFunds(member.id), owedAmount = memberOwed(member.id); return `<article class="member-status-card"><span class="avatar">${accountAvatarContent(member)}</span><span><b>${escapeHtml(member.nickname || member.name)}${profile?.id === member.id ? " (you)" : ""}</b><small class="${awaiting.length ? "owing" : ""}">${awaiting.length ? `${awaiting.length} unpaid · ${money(owedAmount)} to pay` : "All paid up"}</small></span></article>`; }).join("") || `<div class="empty-state"><b>No members yet</b>Add housemates to start tracking payments.</div>`;
