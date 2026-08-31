@@ -32,3 +32,6 @@
 /* Your own posts remain calm but recognisable on the shared fund board. */
 .fund-row.posted-by-you .fund-copy strong,.fund-row.posted-by-you .fund-copy small,.fund-row.posted-by-you .fund-amount{color:#4f7a55}
 .fund-row.posted-by-you .fund-copy strong{font-weight:700}
+
+/* Split-fund board controls and personal posting cue. */
+.sort-box{display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid #dedede;border-radius:10px;background:#fff;color:#666;font-size:10px}.sort-box select{border:0;outline:0;background:transparent;color:#000;font:600 10px "DM Sans",Arial,sans-serif}.fund-row.posted-by-you .fund-copy strong,.fund-row.posted-by-you .fund-copy small,.fund-row.posted-by-you .fund-amount{color:#4f7a55}.fund-row.posted-by-you .fund-copy strong{font-weight:700}@media(max-width:560px){.sort-box{align-self:flex-start}.fund-toolbar{gap:8px}}
