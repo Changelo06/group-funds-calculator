@@ -373,7 +373,7 @@ function ensureMemberContactField() {
 
 function openMemberModal(member = null) {
   ensureMemberContactField();
-  if (!member && !isAdmin()) return showToast("Only Chan can add new accounts.");
+  if (!member) return showToast("This group uses five fixed member profiles.");
   if (member && !canManageMember(member)) return showToast("You can only edit your own account.");
   editingMemberId = member?.id || null;
   byId("member-modal").hidden = false;
@@ -407,7 +407,8 @@ byId("member-form").addEventListener("submit", async event => {
   event.stopImmediatePropagation();
   const name = byId("member-name").value.trim(), nickname = byId("member-nickname").value.trim(), label = byId("member-label").value.trim(), contact = byId("member-contact").value.trim();
   const existing = editingMemberId ? state.members.find(member => member.id === editingMemberId) : null;
-  if ((!editingMemberId && !isAdmin()) || (existing && !canManageMember(existing))) return showToast("You can only manage your own account.");
+  if (!editingMemberId) return showToast("This group uses five fixed member profiles.");
+  if (existing && !canManageMember(existing)) return showToast("You can only manage your own account.");
   try {
     state = editingMemberId
       ? await api(`/api/members/${editingMemberId}`, { method:"PATCH", body:JSON.stringify({ name, nickname, label, contact, avatar:existing.avatar || "", paymentMethods:existing.paymentMethods || [] }) })
@@ -495,13 +496,13 @@ function renderProfileChrome() {
 
 function renderMembers() {
   byId("member-total").textContent = `${state.members.length} member account${state.members.length === 1 ? "" : "s"}`;
-  const addButton = document.querySelector("[data-open-member]"); if (addButton) addButton.hidden = !isAdmin();
+  const addButton = document.querySelector("[data-open-member]"); if (addButton) addButton.hidden = true;
   byId("members-list").innerHTML = state.members.map((member, index) => {
     const unpaid = memberUnpaidFunds(member.id), status = unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"}` : "All paid up", canManage = canManageMember(member);
     const avatar = canManage ? `<button class="avatar avatar-photo" type="button" data-select-member-photo="${member.id}" aria-label="Change ${escapeHtml(member.name)} profile photo">${accountAvatarContent(member)}<i>＋</i></button>` : `<span class="avatar">${accountAvatarContent(member)}</span>`;
-    const actions = `<button class="view-payment-button" type="button" data-view-payment-profile="${member.id}">Payment profile</button>${canManage ? `<button class="edit-member-button" type="button" data-edit-member="${member.id}">Edit</button>` : ""}${isAdmin() && member.id !== ADMIN_MEMBER_ID ? `<button class="remove-member-button" type="button" data-delete-member="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">Remove</button>` : ""}`;
+    const actions = `<button class="view-payment-button" type="button" data-view-payment-profile="${member.id}">Payment profile</button>${canManage ? `<button class="edit-member-button" type="button" data-edit-member="${member.id}">Edit</button>` : ""}`;
     return `<article class="member-id-card"><div class="member-id-band"><span>GROUP FUNDS</span><span>MEMBER ID ${String(index + 1).padStart(2, "0")}</span></div><div class="member-id-main">${avatar}<span class="member-id-copy"><small>${escapeHtml(member.label || "HOUSE MEMBER")}</small><b>${escapeHtml(member.nickname || member.name)}</b><span>${escapeHtml(member.contact || "No contact added")}</span></span></div><div class="member-id-footer"><span>${memberFundCount(member.id)} shared fund${memberFundCount(member.id) === 1 ? "" : "s"}</span><b class="${unpaid.length ? "owing" : ""}">${status}</b></div><div class="member-id-actions">${actions}</div></article>`;
-  }).join("") || `<div class="empty-state"><b>No accounts yet</b>Chan can add the first member account.</div>`;
+  }).join("") || `<div class="empty-state"><b>No accounts available</b>This group is limited to its five member profiles.</div>`;
 }
 
 function openProfilePicker() {
@@ -511,7 +512,7 @@ function openProfilePicker() {
 
 document.addEventListener("click", event => {
   const removeButton = event.target.closest("[data-delete-member]");
-  if (removeButton && !isAdmin()) { event.preventDefault(); event.stopImmediatePropagation(); showToast("Only Chan can remove member accounts."); }
+  if (removeButton) { event.preventDefault(); event.stopImmediatePropagation(); showToast("The five member profiles are fixed."); }
 }, true);
 
 byId("member-photo-input").addEventListener("change", async event => {

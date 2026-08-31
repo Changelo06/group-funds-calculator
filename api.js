@@ -22,8 +22,10 @@ module.exports = async (request, response) => {
   const url = new URL(request.url, "http://localhost");
   const parts = url.pathname.split("/").filter(Boolean);
   const isMembersRoute = parts[0] === "api" && parts[1] === "members";
+  if (url.pathname === "/api/members" && request.method === "POST") return sendJson(response, 405, { error:"This group uses five fixed member accounts." });
   const isSingleMember = isMembersRoute && parts[2] && parts.length === 3;
-  const supportsMemberDetails = (url.pathname === "/api/members" && request.method === "POST") || (isSingleMember && request.method === "PATCH");
+  if (isSingleMember && request.method === "DELETE") return sendJson(response, 405, { error:"The five member accounts cannot be removed." });
+  const supportsMemberDetails = isSingleMember && request.method === "PATCH";
   if (!supportsMemberDetails) return originalApiHandler(request, response);
   try {
     const input = await body(request), name = String(input.name || "").trim(), contact = String(input.contact || "").trim(), nickname = String(input.nickname || "").trim(), label = String(input.label || "").trim(), avatar = input.avatar == null ? "" : String(input.avatar), paymentMethods = Array.isArray(input.paymentMethods) ? input.paymentMethods.slice(0, 3).map(item => ({ id:String(item.id || crypto.randomUUID()), label:String(item.label || "").trim(), image:String(item.image || "") })) : [];
@@ -34,6 +36,7 @@ module.exports = async (request, response) => {
     const state = await readState();
     const member = isSingleMember ? state.members.find(item => item.id === parts[2]) : null;
     if (isSingleMember && !member) return sendJson(response, 404, { error:"Member not found." });
+    if (member && name !== member.name) throw new Error("Member account names are fixed; edit the nickname or profile label instead.");
     if (state.members.some(item => item.id !== member?.id && item.name.toLowerCase() === name.toLowerCase())) throw new Error("That member is already in this group.");
     if (member) Object.assign(member, { name, contact, nickname, label, avatar, paymentMethods });
     else state.members.push({ id:crypto.randomUUID(), name, contact, nickname, label, avatar, paymentMethods });
