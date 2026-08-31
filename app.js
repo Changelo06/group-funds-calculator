@@ -1,5 +1,6 @@
 const currency = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
 let state = { members: [], funds: [] }, activeRoute = "overview", activeFilter = "all", activeSort = "date", editingFundId = null, activeFundId = null, currentReceipt = null, calculatorExpression = "";
+let sharedFundId = new URLSearchParams(location.search).get("fund") || "", forceSharedProfile = Boolean(sharedFundId);
 const byId = id => document.getElementById(id);
 const dateInput = byId("fund-date"); dateInput.value = new Date().toISOString().slice(0, 10);
 const money = value => currency.format(Number(value) || 0);
@@ -17,7 +18,7 @@ const posterName = fund => (state.members.find(member => member.id === (fund.cre
 const sortFunds = (funds, sort = activeSort) => [...funds].sort((a,b) => { if (sort === "name") return a.title.localeCompare(b.title) || postedAt(b).localeCompare(postedAt(a)); if (sort === "member") return posterName(a).localeCompare(posterName(b)) || a.title.localeCompare(b.title); return postedAt(b).localeCompare(postedAt(a)); });
 function showToast(message) { const toast = byId("toast"); toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), 2800); }
 async function api(url, options = {}) { const response = await fetch(url, { headers:{ "Content-Type":"application/json" }, ...options }); if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || "Could not save your changes."); } return response.json(); }
-async function loadState(silent = false) { try { state = await api("/api/state"); document.querySelector(".connection").classList.add("online"); byId("connection-status").textContent = "Live sync on"; render(); } catch (error) { document.querySelector(".connection").classList.remove("online"); byId("connection-status").textContent = "Offline mode"; if (!silent) showToast("Could not reach the shared expense data."); } }
+async function loadState(silent = false) { try { state = await api("/api/state"); if (sharedFundId && state.funds.some(fund => fund.id === sharedFundId)) activeFundId = sharedFundId; document.querySelector(".connection").classList.add("online"); byId("connection-status").textContent = "Live sync on"; render(); } catch (error) { document.querySelector(".connection").classList.remove("online"); byId("connection-status").textContent = "Offline mode"; if (!silent) showToast("Could not reach the shared expense data."); } }
 function legacy_render_1() { renderNavigation(); renderOverview(); renderFunds(); renderMembers(); if (activeFundId) renderDetail(); }
 function legacy_renderNavigation_1() { byId("open-nav-count").textContent = openFunds().length; document.querySelectorAll(".nav-link, .tab-link").forEach(link => link.classList.toggle("active", link.dataset.route === activeRoute)); }
 function legacy_fundsHtml_1(funds, emptyTitle, emptyCopy) { if (!funds.length) return `<div class="empty-state"><b>${emptyTitle}</b>${emptyCopy}<br><button class="primary-button" type="button" data-open-fund>＋ Add split fund</button></div>`; return funds.map(fund => { const count = paidCount(fund), people = fund.memberIds.length, done = settled(fund), percent = people ? count / people * 100 : 0; return `<button class="fund-row" data-fund-id="${fund.id}" type="button"><span class="fund-icon">${fund.icon || "◈"}</span><span class="fund-copy"><strong>${escapeHtml(fund.title)}</strong><small>${escapeHtml(fund.description || "No description")}</small></span><span class="fund-meta"><b>${dateLabel(fund.date)}</b>${people} member${people === 1 ? "" : "s"}</span><span class="payment-progress"><span class="progress-caption"><span>${count}/${people} paid</span><b>${Math.round(percent)}%</b></span><span class="progress"><i style="width:${percent}%"></i></span></span><span class="fund-amount">${money(fund.total)}</span><span class="status-pill ${done ? "settled" : ""}">${done ? "Settled" : "Open"}</span><span class="row-arrow">›</span></button>`; }).join(""); }
@@ -32,7 +33,7 @@ function renderReceiptPreview() { const preview = byId("receipt-preview"); previ
 function legacy_openFundModal_1(fund = null) { editingFundId = fund?.id || null; currentReceipt = fund?.receipt || null; calculatorExpression = ""; byId("calculator-display").textContent = "0"; byId("receipt-input").value = ""; renderReceiptPreview(); byId("fund-modal-eyebrow").textContent = fund ? "EDIT SPLIT FUND" : "NEW SPLIT FUND"; byId("fund-modal-title").textContent = fund ? "Edit split fund" : "Add a split fund"; byId("save-fund-button").textContent = fund ? "Save changes" : "Create split fund"; byId("fund-title").value = fund?.title || ""; byId("fund-description").value = fund?.description || ""; byId("fund-date").value = fund?.date || new Date().toISOString().slice(0,10); byId("fund-total").value = fund?.total || ""; byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${fund?.memberIds.includes(member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join(""); byId("all-members-caption").textContent = `${state.members.length} people`; byId("fund-modal").hidden = false; updateFundPreview(); byId("fund-title").focus(); }
 function closeModals() { document.querySelectorAll(".modal-backdrop").forEach(modal => modal.hidden = true); activeFundId = null; }
 function legacy_openMemberModal_1() { byId("member-modal").hidden = false; byId("member-name").value = ""; byId("member-name").focus(); }
-function legacy_renderDetail_1() { const fund = state.funds.find(item => item.id === activeFundId); if (!fund) return closeModals(); const people = fundPeople(fund), count = paidCount(fund); byId("detail-date").textContent = `${dateLabel(fund.date)} · SPLIT FUND`; byId("detail-title").textContent = fund.title; byId("detail-description").textContent = fund.description || "No description added."; byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${people.length} paid`; byId("detail-receipt").hidden = !fund.receipt; if (fund.receipt) byId("detail-receipt-image").src = fund.receipt; byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(share(fund))} share</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("detail-modal").hidden = false; }
+function legacy_renderDetail_1() { const fund = state.funds.find(item => item.id === activeFundId); if (!fund) return closeModals(); const people = fundPeople(fund), count = paidCount(fund); byId("detail-date").textContent = `${dateLabel(fund.date)} · SPLIT FUND`; byId("detail-title").textContent = fund.title; byId("detail-description").textContent = fund.description || "No description added."; byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${people.length} paid`; byId("detail-receipt").hidden = !fund.receipt; if (fund.receipt) byId("detail-receipt-image").src = fund.receipt; byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(share(fund))} share</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false; }
 function renderCalculator() { byId("calculator-display").textContent = calculatorExpression ? calculatorExpression.replace(/\*/g,"×").replace(/\//g,"÷") : "0"; }
 function legacy_useCalculatorKey_1(key) { if (key === "clear") calculatorExpression = ""; else if (key === "back") calculatorExpression = calculatorExpression.slice(0, -1); else if (key === "equals") { if (!calculatorExpression || !/^[0-9+\-*/.\s]+$/.test(calculatorExpression)) return showToast("Use valid numbers and calculator operators."); try { const result = Function(`"use strict"; return (${calculatorExpression})`)(); if (!Number.isFinite(result)) throw new Error(); const rounded = Math.round(result * 100) / 100; calculatorExpression = String(rounded); byId("fund-total").value = rounded; updateFundPreview(); } catch { return showToast("That calculation cannot be solved."); } } else { const operators = "+-*/"; const last = calculatorExpression.slice(-1); if (operators.includes(key) && (!calculatorExpression || operators.includes(last))) { if (key === "-" && !calculatorExpression) calculatorExpression = "-"; else if (calculatorExpression) calculatorExpression = calculatorExpression.slice(0,-1) + key; } else if (key === ".") { const currentNumber = calculatorExpression.split(/[+\-*/]/).pop(); if (!currentNumber.includes(".")) calculatorExpression += key; } else calculatorExpression += key; renderCalculator(); } }
 async function compressReceipt(file) { if (!file || !file.type.startsWith("image/")) throw new Error("Choose a PNG, JPEG, or WebP receipt image."); const source = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error("The receipt could not be read.")); reader.readAsDataURL(file); }); const image = await new Promise((resolve,reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = () => reject(new Error("The receipt image could not be opened.")); element.src = source; }); const scale = Math.min(1, 1000 / Math.max(image.width, image.height)); const canvas = document.createElement("canvas"); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale); canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height); let encoded = canvas.toDataURL("image/jpeg", .76); if (encoded.length > 850000) { canvas.width = Math.round(canvas.width * .78); canvas.height = Math.round(canvas.height * .78); canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height); encoded = canvas.toDataURL("image/jpeg", .62); } if (encoded.length > 900000) throw new Error("That receipt is still too large. Please use a smaller image."); return encoded; }
@@ -100,7 +101,7 @@ function render() {
   renderMembers();
   renderMore();
   if (activeFundId) renderDetail();
-  if (state.members.length && !currentProfile()) openProfilePicker();
+  if (state.members.length && (!currentProfile() || forceSharedProfile)) openProfilePicker();
 }
 
 function showRoute(route) {
@@ -121,6 +122,7 @@ document.addEventListener("click", event => {
   const profileButton = event.target.closest("[data-select-profile]");
   if (profileButton) {
     currentMemberId = profileButton.dataset.selectProfile;
+    forceSharedProfile = false;
     localStorage.setItem(PROFILE_STORAGE_KEY, currentMemberId);
     byId("profile-modal").hidden = true;
     render();
@@ -242,7 +244,7 @@ function renderDetail() {
   byId("detail-description").innerHTML = sanitizeDescriptionHtml(fund.description) || "No description added.";
   byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${people.length} paid`;
   byId("detail-receipt").hidden = !fund.receipt; if (fund.receipt) byId("detail-receipt-image").src = fund.receipt;
-  byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(share(fund))} share</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("detail-modal").hidden = false;
+  byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(share(fund))} share</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false;
 }
 
 installDescriptionEditor();
@@ -537,3 +539,81 @@ byId("member-photo-input").addEventListener("change", async event => {
     event.target.value = ""; photoMemberId = ""; render(); showToast("Profile photo updated.");
   } catch (error) { event.target.value = ""; showToast(error.message); }
 }, true);
+function paymentRecord(fund, memberId) {
+  const record = fund.payments?.[memberId];
+  return record && record !== true ? record : null;
+}
+
+function paymentAuditMarkup(fund) {
+  const entries = Array.isArray(fund.paymentAudit) ? [...fund.paymentAudit].reverse() : [];
+  if (!entries.length) return `<p class="payment-audit-empty">Payment confirmations will appear here.</p>`;
+  return entries.map(entry => {
+    const member = state.members.find(item => item.id === entry.memberId) || { name:"Former member" };
+    const confirmer = state.members.find(item => item.id === entry.confirmedById) || { name:"Unknown profile" };
+    const timestamp = new Intl.DateTimeFormat("en-PH", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }).format(new Date(entry.at));
+    const action = entry.action === "paid" ? `marked paid via ${escapeHtml(entry.method)}` : "reopened the payment";
+    const note = entry.note ? `<small>${escapeHtml(entry.note)}</small>` : "";
+    return `<article class="payment-audit-row"><span><b>${escapeHtml(member.name)}</b> ${action}</span><span>by ${escapeHtml(confirmer.name)} · ${timestamp}</span>${note}</article>`;
+  }).join("");
+}
+
+let pendingPayment = null;
+function ensurePaymentConfirmationDialog() {
+  if (byId("payment-confirm-modal")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop" id="payment-confirm-modal" hidden><form class="modal small-modal payment-confirm-card" id="payment-confirm-form"><div class="modal-header"><div><p class="eyebrow">CONFIRM PAYMENT</p><h2 id="payment-confirm-title">Mark payment as paid</h2><p class="detail-description" id="payment-confirm-copy"></p></div><button class="close-button" type="button" data-close-modal aria-label="Close">×</button></div><fieldset class="payment-method-picker"><legend>How was this paid?</legend><label><input type="radio" name="payment-method" value="cash" required /><span>Cash</span></label><label><input type="radio" name="payment-method" value="online" /><span>Online</span></label></fieldset><label><span>Note <em>optional</em></span><textarea id="payment-confirm-note" maxlength="300" placeholder="e.g. GCash sent, handed over at home"></textarea></label><div class="modal-actions"><button type="button" class="cancel-button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Confirm paid</button></div></form></div>`);
+  byId("payment-confirm-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!pendingPayment) return;
+    const method = document.querySelector('input[name="payment-method"]:checked')?.value;
+    if (!method) return showToast("Choose cash or online.");
+    try {
+      state = await api(`/api/funds/${pendingPayment.fundId}/payments`, { method:"PATCH", body:JSON.stringify({ memberId:pendingPayment.memberId, paid:true, method, note:byId("payment-confirm-note").value.trim(), confirmedById:currentProfile()?.id || ADMIN_MEMBER_ID }) });
+      byId("payment-confirm-modal").hidden = true;
+      pendingPayment = null;
+      render();
+      showToast("Payment recorded in the audit trail.");
+    } catch (error) { showToast(error.message); }
+  });
+}
+
+function openPaymentConfirmation(fund, memberId) {
+  ensurePaymentConfirmationDialog();
+  const member = state.members.find(item => item.id === memberId) || { name:"Member" };
+  pendingPayment = { fundId:fund.id, memberId };
+  byId("payment-confirm-title").textContent = `Confirm ${member.name}'s payment`;
+  byId("payment-confirm-copy").textContent = `${money(share(fund))} for ${fund.title}. Choose how it was paid; a note is optional.`;
+  document.querySelectorAll('input[name="payment-method"]').forEach(input => input.checked = false);
+  byId("payment-confirm-note").value = "";
+  byId("payment-confirm-modal").hidden = false;
+}
+
+document.addEventListener("click", async event => {
+  const paymentButton = event.target.closest("[data-toggle-payment]");
+  if (!paymentButton) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const fund = state.funds.find(item => item.id === activeFundId);
+  if (!fund) return;
+  const memberId = paymentButton.dataset.togglePayment;
+  if (!fund.payments?.[memberId]) return openPaymentConfirmation(fund, memberId);
+  if (!window.confirm("Reopen this payment? The change will remain in the payment history.")) return;
+  try {
+    state = await api(`/api/funds/${fund.id}/payments`, { method:"PATCH", body:JSON.stringify({ memberId, paid:false, confirmedById:currentProfile()?.id || ADMIN_MEMBER_ID }) });
+    render();
+    showToast("Payment reopened and logged.");
+  } catch (error) { showToast(error.message); }
+}, true);
+
+byId("share-fund").addEventListener("click", async () => {
+  const fund = state.funds.find(item => item.id === activeFundId);
+  if (!fund) return;
+  const link = new URL(location.href);
+  link.searchParams.set("fund", fund.id);
+  link.hash = "funds";
+  try {
+    await navigator.clipboard.writeText(link.toString());
+    showToast("Share link copied. It will ask the visitor to choose a profile.");
+  } catch {
+    window.prompt("Copy this share link", link.toString());
+  }
+});
