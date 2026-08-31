@@ -100,6 +100,9 @@ function render() {
     currentMemberId = "";
     localStorage.removeItem(PROFILE_STORAGE_KEY);
   }
+  const profileRequired = state.members.length && (!currentProfile() || forceSharedProfile || forceProfileSelection);
+  document.body.classList.toggle("profile-required", Boolean(profileRequired));
+  document.querySelector(".app-shell").setAttribute("aria-hidden", profileRequired ? "true" : "false");
   renderNavigation();
   renderProfileChrome();
   renderOverview();
@@ -107,10 +110,11 @@ function render() {
   renderMembers();
   renderMore();
   if (activeFundId) renderDetail();
-  if (state.members.length && (!currentProfile() || forceSharedProfile || forceProfileSelection)) openProfilePicker();
+  if (profileRequired) openProfilePicker();
 }
 
 function showRoute(route) {
+  if (state.members.length && (!currentProfile() || forceSharedProfile || forceProfileSelection)) return openProfilePicker();
   activeRoute = route;
   ["overview", "funds", "members", "more"].forEach(name => byId(`${name}-view`).hidden = name !== route);
   if (window.location.hash.slice(1) !== route) window.location.hash = route;
@@ -263,6 +267,7 @@ function openSplitChoice() {
   byId("split-choice-modal").hidden = false;
 }
 function openFundModal(fund = null, requestedMode = null) {
+  if (state.members.length && (!currentProfile() || forceSharedProfile || forceProfileSelection)) return openProfilePicker();
   if (!fund && !requestedMode) return openSplitChoice();
   installDescriptionEditor();
   ensureItemizedEditor();
