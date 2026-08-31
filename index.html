@@ -23,15 +23,15 @@
         <section class="tip-card"><span class="tip-icon">✦</span><div><b>Split faster next time</b><p>Use “All members” when everyone in the house should contribute. You can still edit people before saving.</p></div></section>
       </section>
       <section id="funds-view" class="view" hidden>
-        <header class="page-header"><div><p class="eyebrow">HAPPY HOUSE</p><h1>Split funds</h1><p class="subheading">Every shared purchase, in one place.</p></div><button class="primary-button" type="button" data-open-fund><span>＋</span> Add split fund</button></header>
+        <header class="page-header"><div><p class="eyebrow">HAPPY HOUSE</p><h1>Split funds</h1></div><button class="primary-button" type="button" data-open-fund><span>＋</span> Add split fund</button></header>
         <div class="fund-toolbar"><div class="filter-tabs" role="tablist"><button class="filter active" data-filter="all" type="button">All <b id="all-count">0</b></button><button class="filter" data-filter="open" type="button">Open <b id="open-count">0</b></button><button class="filter" data-filter="settled" type="button">Settled <b id="settled-count">0</b></button></div><label class="sort-box"><span>Sort</span><select id="fund-sort" aria-label="Sort split funds"><option value="date">Date posted</option><option value="name">Fund name</option><option value="member">Posted by</option></select></label><label class="search-box"><span>⌕</span><input id="fund-search" placeholder="Search funds" /></label></div><div class="fund-list" id="funds-list"></div>
       </section>
       <section id="members-view" class="view" hidden>
-        <header class="page-header"><div><p class="eyebrow">HAPPY HOUSE</p><h1>Members</h1><p class="subheading">The five permanent RM331 accounts.</p></div></header>
+        <header class="page-header"><div><p class="eyebrow">HAPPY HOUSE</p><h1>Members</h1></div></header>
         <div class="member-panel"><div class="members-intro"><span class="member-large-icon">♙</span><div><h2 id="member-total">0 house members</h2><p>Remove a member only when they are no longer part of the house. Past splits stay intact.</p></div></div><div class="members-grid" id="members-list"></div></div>
       </section>
       <section id="more-view" class="view" hidden>
-        <header class="page-header"><div><p class="eyebrow">PERSONAL TRACKER</p><h1 id="tracker-title">My payments</h1><p class="subheading" id="tracker-subheading">Choose a member to see their payment status.</p></div><button class="secondary-button" type="button" data-open-profile>Switch member</button></header>
+        <header class="page-header"><div><p class="eyebrow">PERSONAL TRACKER</p><h1 id="tracker-title">My payments</h1></div></header>
         <section class="profile-summary" id="profile-summary"></section>
         <section class="section-block"><div class="section-heading"><div><p class="eyebrow">TO PAY</p><h2>Still unpaid</h2></div><span class="section-count" id="unpaid-count">0</span></div><div class="personal-fund-list" id="personal-unpaid-list"></div></section>
         <section class="section-block"><div class="section-heading"><div><p class="eyebrow">HOUSE STATUS</p><h2>Members &amp; payment status</h2></div></div><div class="member-status-grid" id="member-status-list"></div></section>
