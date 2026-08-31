@@ -12,13 +12,11 @@ Open [http://127.0.0.1:4173](http://127.0.0.1:4173). Local changes are saved in 
 
 ## Vercel setup — required for shared live data
 
-Vercel serverless functions cannot use the local JSON file as durable storage. Connect an Upstash Redis database before adding real group expenses:
+Vercel serverless functions cannot use the local JSON file as durable storage. Connect one Redis option before adding real group expenses:
 
-1. In Vercel, open **Group Funds Calculator → Storage** and create or connect an **Upstash Redis** database.
-2. Open **Settings → Environment Variables** and add these two values from Upstash:
-   - `UPSTASH_REDIS_REST_URL`
-   - `UPSTASH_REDIS_REST_TOKEN`
-3. Tick both **Production** and **Preview** for each variable, then save. The legacy `RMIKO_*` variables are not used by this app.
+1. **Existing Redis provider:** In **Settings → Environment Variables**, add `MIKO_REDIS_URL` with a newly generated Redis connection URL. Do not wrap it in quotation marks. This app now supports standard `redis://` and `rediss://` URLs.
+2. **Or Upstash:** In Vercel Marketplace, connect **Upstash Redis**. It supplies `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` automatically.
+3. Tick both **Production** and **Preview** for the chosen variable(s), then save. Never commit a Redis password.
 4. Open **Settings → Deployment Protection → Vercel Authentication**. Disable it for the public production app, or use a public custom production domain. Standard Protection sends API requests to a Vercel login page, so the app cannot load shared data.
 5. Redeploy the latest `master` commit.
 6. Visit `https://YOUR-DEPLOYMENT/api/health`. It must return JSON with `"storage":"redis"` — not a Vercel login screen.
