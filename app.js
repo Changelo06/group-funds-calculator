@@ -256,7 +256,7 @@ function setSplitMode(mode) {
 
 function ensureSplitChoiceModal() {
   if (byId("split-choice-modal")) return;
-  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop split-choice-backdrop" id="split-choice-modal" hidden><section class="modal split-choice-card" aria-labelledby="split-choice-title"><button class="close-button" type="button" data-close-modal aria-label="Close">×</button><p class="eyebrow">NEW GROUP FUND</p><h2 id="split-choice-title">How should this bill be split?</h2><p>Choose the calculation method before adding the details.</p><div class="split-choice-grid"><button type="button" data-new-split-mode="equal"><span>÷</span><b>Equal split</b><small>One total divided equally among the selected members.</small></button><button type="button" data-new-split-mode="itemized"><span>≡</span><b>Itemized order</b><small>Assign each dish, item, or charge to the people who share it.</small></button></div></section></div>`);
+  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop split-choice-backdrop" id="split-choice-modal" hidden><section class="modal split-choice-card" aria-labelledby="split-choice-title"><button class="close-button" type="button" data-close-modal aria-label="Close">×</button><h2 id="split-choice-title">How should this bill be split?</h2><div class="split-choice-grid"><button type="button" data-new-split-mode="equal"><span>÷</span><b>Equal split</b><small>One total divided equally among the selected members.</small></button><button type="button" data-new-split-mode="itemized"><span>≡</span><b>Itemized order</b><small>Assign each dish, item, or charge to the people who share it.</small></button></div></section></div>`);
 }
 function openSplitChoice() {
   ensureSplitChoiceModal();
