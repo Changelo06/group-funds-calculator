@@ -13,7 +13,7 @@ const fundPerson = (fund, id) => state.members.find(member => member.id === id) 
 const fundPeople = fund => fundParticipantIds(fund).map(id => fundPerson(fund, id));
 const payableMemberIds = fund => fundParticipantIds(fund).filter(id => !(fund.splitMode === "itemized" && fund.payerId === id));
 const paidCount = fund => payableMemberIds(fund).filter(id => fund.payments?.[id]).length;
-const share = fund => Number(fund.total) / Math.max(1, fund.memberIds.length);
+const share = fund => Number(fund.total) / Math.max(1, fundParticipantIds(fund).length);
 const memberShare = (fund, memberId) => Number(fund.shares?.[memberId] ?? share(fund));
 const settled = fund => payableMemberIds(fund).length === 0 || paidCount(fund) === payableMemberIds(fund).length;
 const openFunds = () => state.funds.filter(fund => !settled(fund));
@@ -32,8 +32,8 @@ function renderFunds() { const all = state.funds, open = all.filter(fund => !set
 function legacy_renderMembers_1() { byId("member-total").textContent = `${state.members.length} house member${state.members.length === 1 ? "" : "s"}`; byId("members-list").innerHTML = state.members.map(member => `<article class="member-card"><span class="avatar">${initials(member.name)}</span><span><b>${escapeHtml(member.name)}</b><small>${memberFundCount(member.id)} split fund${memberFundCount(member.id) === 1 ? "" : "s"}</small></span><button type="button" data-delete-member="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">×</button></article>`).join("") || `<div class="empty-state"><b>No members yet</b>Add your housemates before creating a fund.</div>`; }
 const memberFundCount = id => state.funds.filter(fund => fund.memberIds.includes(id)).length;
 function legacy_showRoute_1(route) { activeRoute = route; ["overview","funds","members"].forEach(name => byId(`${name}-view`).hidden = name !== route); if (window.location.hash.slice(1) !== route) window.location.hash = route; renderNavigation(); if(route === "funds") renderFunds(); }
-function updateFundPreview() { if (activeSplitMode === "itemized" && byId("itemized-editor")) { updateItemizedSummary(); return; } const selected = document.querySelectorAll(".member-choice input:checked").length, total = Number(byId("fund-total").value) || 0; byId("per-person-preview").innerHTML = `${money(selected ? total / selected : 0)} <small>each</small>`; byId("select-all-members").checked = state.members.length > 0 && selected === state.members.length; const note = byId("selection-note"); note.textContent = selected ? `${selected} member${selected === 1 ? "" : "s"} selected · ${money(total / selected)} each` : "Select at least one person to continue."; note.classList.toggle("ready", Boolean(selected)); document.querySelectorAll(".member-choice").forEach(item => item.classList.toggle("selected", item.querySelector("input").checked)); }
-function refreshFundMemberChoices(includeMemberId) { const selected = new Set([...document.querySelectorAll(".member-choice input:checked")].map(input => input.value)); if (includeMemberId) selected.add(includeMemberId); byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${selected.has(member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join(""); byId("all-members-caption").textContent = `${state.members.length} people`; updateFundPreview(); }
+function updateFundPreview() { if (activeSplitMode === "itemized" && byId("itemized-editor")) { updateItemizedSummary(); return; } const selected = document.querySelectorAll(".member-choice input:checked").length, choices = document.querySelectorAll(".member-choice input").length, total = Number(byId("fund-total").value) || 0; byId("per-person-preview").innerHTML = `${money(selected ? total / selected : 0)} <small>each</small>`; byId("select-all-members").checked = choices > 0 && selected === choices; const note = byId("selection-note"); note.textContent = selected ? `${selected} ${selected === 1 ? "person" : "people"} selected · ${money(total / selected)} each` : "Select at least one person to continue."; note.classList.toggle("ready", Boolean(selected)); document.querySelectorAll(".member-choice").forEach(item => item.classList.toggle("selected", item.querySelector("input").checked)); }
+function refreshFundMemberChoices(includeMemberId) { const selected = new Set([...document.querySelectorAll(".member-choice input:checked")].map(input => input.value)); if (includeMemberId) selected.add(includeMemberId); const people = [...state.members, ...itemizedGuests]; byId("fund-member-select").innerHTML = people.map(person => `<label class="member-choice"><input type="checkbox" value="${escapeHtml(person.id)}" ${selected.has(person.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(person.nickname || person.name)}${person.guest ? " · temporary" : ""}</span></label>`).join(""); byId("all-members-caption").textContent = `${people.length} people`; updateFundPreview(); }
 function renderReceiptPreview() { const preview = byId("receipt-preview"); preview.hidden = !currentReceipt; if (currentReceipt) byId("receipt-image").src = currentReceipt; }
 function legacy_openFundModal_1(fund = null) { editingFundId = fund?.id || null; currentReceipt = fund?.receipt || null; calculatorExpression = ""; byId("calculator-display").textContent = "0"; byId("receipt-input").value = ""; renderReceiptPreview(); byId("fund-modal-eyebrow").textContent = fund ? "EDIT SPLIT FUND" : "NEW SPLIT FUND"; byId("fund-modal-title").textContent = fund ? "Edit split fund" : "Add a split fund"; byId("save-fund-button").textContent = fund ? "Save changes" : "Create split fund"; byId("fund-title").value = fund?.title || ""; byId("fund-description").value = fund?.description || ""; byId("fund-date").value = fund?.date || new Date().toISOString().slice(0,10); byId("fund-total").value = fund?.total || ""; byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${fund?.memberIds.includes(member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join(""); byId("all-members-caption").textContent = `${state.members.length} people`; byId("fund-modal").hidden = false; updateFundPreview(); byId("fund-title").focus(); }
 function closeModals() { document.querySelectorAll(".modal-backdrop").forEach(modal => modal.hidden = true); activeFundId = null; }
@@ -275,13 +275,15 @@ function openFundModal(fund = null, requestedMode = null) {
   byId("fund-title").value = fund?.title || ""; byId("fund-description").innerHTML = sanitizeDescriptionHtml(fund?.description || "");
   byId("fund-date").value = fund?.date || new Date().toISOString().slice(0,10); byId("fund-total").value = fund?.total || "";
   const defaultPayerId = currentProfile()?.id || ADMIN_MEMBER_ID;
-  byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${(fund ? fund.memberIds.includes(member.id) : defaultPayerId === member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join("");
+  itemizedGuests = (fund?.guests || []).map(guest => ({ id:guest.id, name:guest.name, guest:true }));
+  const selectedParticipantIds = new Set(fund ? fundParticipantIds(fund) : [defaultPayerId]);
+  const people = [...state.members, ...itemizedGuests];
+  byId("fund-member-select").innerHTML = people.map(person => `<label class="member-choice"><input type="checkbox" value="${escapeHtml(person.id)}" ${selectedParticipantIds.has(person.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(person.nickname || person.name)}${person.guest ? " · temporary" : ""}</span></label>`).join("");
   byId("itemized-payer").innerHTML = state.members.map(member => `<option value="${member.id}">${escapeHtml(member.nickname || member.name)}</option>`).join("");
   byId("itemized-payer").value = fund?.payerId || defaultPayerId;
-  itemizedGuests = fund?.splitMode === "itemized" ? (fund.guests || []).map(guest => ({ id:guest.id, name:guest.name, guest:true })) : [];
   itemizedDraft = fund?.splitMode === "itemized" && fund.items?.length ? fund.items.map(item => ({ ...item, memberIds:[...item.memberIds] })) : [{ id:newItemId(), name:"", amount:"", memberIds:[defaultPayerId] }];
   renderItemizedRows();
-  byId("all-members-caption").textContent = `${state.members.length} people`; byId("fund-modal").hidden = false; setSplitMode(selectedMode); byId("fund-title").focus();
+  byId("all-members-caption").textContent = `${people.length} people`; byId("fund-modal").hidden = false; setSplitMode(selectedMode); byId("fund-title").focus();
 }
 
 document.addEventListener("mousedown", event => {
@@ -299,17 +301,18 @@ document.addEventListener("click", event => {
   if (modeButton) { event.preventDefault(); byId("split-choice-modal").hidden = true; return openFundModal(null, modeButton.dataset.newSplitMode); }
   const addItem = event.target.closest("[data-add-item]");
   if (addItem) { event.preventDefault(); try { itemizedDraft = readItemizedRows(); itemizedDraft.push({ id:newItemId(), name:"", amount:"", memberIds:[currentProfile()?.id || ADMIN_MEMBER_ID] }); return renderItemizedRows(); } catch (error) { return showToast(error.message || "Could not add an item."); } }
-  const addGuest = event.target.closest("[data-add-item-guest]");
+  const addGuest = event.target.closest("[data-add-item-guest], [data-add-temporary-member]");
   if (addGuest) {
     event.preventDefault();
-    const name = window.prompt("Guest's name (only for this bill)")?.trim();
+    const itemGuest = addGuest.matches("[data-add-item-guest]"), name = window.prompt("Temporary member's name (only for this fund)")?.trim();
     if (!name) return;
     if (name.length > 50) return showToast("Keep the guest name under 50 characters.");
     if ([...state.members, ...itemizedGuests].some(person => person.name.toLowerCase() === name.toLowerCase())) return showToast("That person is already available for this bill.");
     if (itemizedGuests.length >= 10) return showToast("This bill can include up to 10 guests.");
-    itemizedDraft = readItemizedRows();
+    if (itemGuest) itemizedDraft = readItemizedRows();
     const guest = { id:`guest-${newItemId()}`, name, guest:true };
     itemizedGuests.push(guest);
+    if (!itemGuest) return refreshFundMemberChoices(guest.id);
     const row = addGuest.closest("[data-item-row]"), item = itemizedDraft.find(draft => draft.id === row?.dataset.itemRow);
     if (item) item.memberIds = [...new Set([...(item.memberIds || []), guest.id])];
     return renderItemizedRows();
@@ -325,7 +328,7 @@ byId("fund-form").addEventListener("submit", async event => {
   const isItemized = activeSplitMode === "itemized", items = isItemized ? readItemizedRows() : [], memberIds = isItemized ? [...new Set(items.flatMap(item => item.memberIds))] : [...document.querySelectorAll(".member-choice input:checked")].map(input => input.value);
   if (!memberIds.length) return showToast(isItemized ? "Choose who shares at least one item." : "Select at least one member.");
   if (isItemized && items.some(item => !item.name || !Number.isFinite(item.amount) || item.amount <= 0 || !item.memberIds.length)) return showToast("Complete each item with a name, price, and people sharing it.");
-  const payload = { title:byId("fund-title").value.trim(), description:sanitizeDescriptionHtml(byId("fund-description").innerHTML), date:byId("fund-date").value, total:isItemized ? items.reduce((sum, item) => sum + item.amount, 0) : Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID, splitMode:activeSplitMode, payerId:isItemized ? byId("itemized-payer").value : null, items, guests:isItemized ? itemizedGuests.map(({ id, name }) => ({ id, name })) : [] };
+  const payload = { title:byId("fund-title").value.trim(), description:sanitizeDescriptionHtml(byId("fund-description").innerHTML), date:byId("fund-date").value, total:isItemized ? items.reduce((sum, item) => sum + item.amount, 0) : Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID, splitMode:activeSplitMode, payerId:isItemized ? byId("itemized-payer").value : null, items, guests:itemizedGuests.map(({ id, name }) => ({ id, name })) };
   try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); showToast(message); } catch(error) { showToast(error.message); }
 }, true);
 

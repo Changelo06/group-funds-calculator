@@ -69,6 +69,17 @@ module.exports = async (request, response) => {
   } catch (error) { return sendJson(response, 400, { error:error.message || "Something went wrong." }); }
 };
 
+function validGuests(input, members) {
+  const rawGuests = Array.isArray(input.guests) ? input.guests.slice(0, 10) : [], seenGuestIds = new Set(), seenNames = new Set(members.map(member => member.name.toLowerCase()));
+  return rawGuests.map((guest, index) => {
+    const id = String(guest?.id || "").trim(), name = String(guest?.name || "").trim();
+    if (!/^guest-[a-zA-Z0-9-]+$/.test(id) || seenGuestIds.has(id)) throw new Error(`Temporary member ${index + 1} is invalid.`);
+    if (!name || name.length > 50 || seenNames.has(name.toLowerCase())) throw new Error(`Temporary member ${index + 1} needs a unique name up to 50 characters.`);
+    seenGuestIds.add(id); seenNames.add(name.toLowerCase());
+    return { id, name };
+  });
+}
+
 function validFund(input, members) {
   const title = String(input.title || "").trim(), description = String(input.description || "").trim().replace(/<(?!\/?(?:b|strong|i|em|ul|ol|li|p|br)\b)[^>]*>/gi, "").replace(/<(b|strong|i|em|ul|ol|li|p|br)(?:\s[^>]*)?>/gi, "<$1>").replace(/<\/(b|strong|i|em|ul|ol|li|p)>/gi, "</$1>"), date = String(input.date || ""), receipt = input.receipt == null ? null : String(input.receipt), splitMode = input.splitMode === "itemized" ? "itemized" : "equal";
   const ids = [...new Set(Array.isArray(input.memberIds) ? input.memberIds.filter(id => typeof id === "string") : [])].filter(id => members.some(member => member.id === id));
@@ -77,15 +88,7 @@ function validFund(input, members) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Choose a valid date.");
   if (receipt && (!/^data:image\/(png|jpeg|webp);base64,/i.test(receipt) || receipt.length > 900000)) throw new Error("Choose a smaller PNG, JPEG, or WebP receipt image.");
   if (splitMode === "itemized") {
-    const payerId = String(input.payerId || ""), rawItems = Array.isArray(input.items) ? input.items.slice(0, 40) : [], rawGuests = Array.isArray(input.guests) ? input.guests.slice(0, 10) : [], sharesInCents = {};
-    const seenGuestIds = new Set(), seenNames = new Set(members.map(member => member.name.toLowerCase()));
-    const guests = rawGuests.map((guest, index) => {
-      const id = String(guest?.id || "").trim(), name = String(guest?.name || "").trim();
-      if (!/^guest-[a-zA-Z0-9-]+$/.test(id) || seenGuestIds.has(id)) throw new Error(`Guest ${index + 1} is invalid.`);
-      if (!name || name.length > 50 || seenNames.has(name.toLowerCase())) throw new Error(`Guest ${index + 1} needs a unique name up to 50 characters.`);
-      seenGuestIds.add(id); seenNames.add(name.toLowerCase());
-      return { id, name };
-    });
+    const payerId = String(input.payerId || ""), rawItems = Array.isArray(input.items) ? input.items.slice(0, 40) : [], guests = validGuests(input, members), sharesInCents = {};
     const peopleById = new Map([...members, ...guests].map(person => [person.id, person]));
     if (!members.some(member => member.id === payerId)) throw new Error("Choose the member who paid the bill.");
     if (!rawItems.length) throw new Error("Add at least one item or shared charge.");
@@ -103,6 +106,7 @@ function validFund(input, members) {
   }
   const total = Number(input.total);
   if (!Number.isFinite(total) || total <= 0) throw new Error("Enter a total greater than zero.");
-  if (!ids.length) throw new Error("Select at least one current member.");
-  return { title, description, date, total:Math.round(total * 100) / 100, memberIds:ids, participantIds:ids, guests:[], receipt, splitMode:"equal", payerId:null, items:[], shares:{} };
+  const guests = validGuests(input, members), peopleById = new Map([...members, ...guests].map(person => [person.id, person])), participantIds = [...new Set(Array.isArray(input.memberIds) ? input.memberIds.filter(id => typeof id === "string") : [])].filter(id => peopleById.has(id)), memberIds = participantIds.filter(id => members.some(member => member.id === id));
+  if (!participantIds.length) throw new Error("Select at least one person.");
+  return { title, description, date, total:Math.round(total * 100) / 100, memberIds, participantIds, guests, receipt, splitMode:"equal", payerId:null, items:[], shares:{} };
 }
