@@ -337,17 +337,6 @@ byId("fund-form").addEventListener("submit", async event => {
   try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); showToast(message); } catch(error) { showToast(error.message); }
 }, true);
 
-function assignedOrdersMarkup(fund) {
-  const payer = fundPerson(fund, fund.payerId);
-  return `<div class="detail-heading assigned-orders-heading"><span>${fund.splitMode === "itemized" ? "ASSIGNED ORDERS" : "SPLIT ASSIGNMENTS"}</span></div><div class="assigned-order-list">${fundPeople(fund).map(person => {
-    const items = fund.splitMode === "itemized" ? (fund.items || []).filter(item => (item.memberIds || []).includes(person.id)) : [];
-    const paid = Boolean(fund.payments?.[person.id]), payerCovered = fund.splitMode === "itemized" && person.id === fund.payerId;
-    const status = payerCovered ? "Covered as payer" : paid ? "Paid" : "Unpaid";
-    const itemLines = items.length ? `<ul>${items.map(item => `<li>${escapeHtml(item.name)} <b>${money(Number(item.amount) / Math.max(1, item.memberIds?.length || 1))}</b></li>`).join("")}</ul>` : `<p>${fund.splitMode === "itemized" ? "No individual items assigned." : "Equal share of the bill."}</p>`;
-    return `<article class="assigned-order"><div><b>${escapeHtml(person.nickname || person.name)}</b><small class="${paid || payerCovered ? "paid" : "unpaid"}">${status}</small></div>${itemLines}<strong>Amount: ${money(memberShare(fund, person.id))}</strong>${fund.splitMode === "itemized" && !payerCovered ? `<small>Pay to ${escapeHtml(payer.nickname || payer.name)}</small>` : ""}</article>`;
-  }).join("")}</div>`;
-}
-
 function generateReceipt(fund) {
   const creator = fundPerson(fund, fundCreatorId(fund)), receiver = fund.splitMode === "itemized" ? fundPerson(fund, fund.payerId) : creator, qr = paymentMethods(receiver)[0];
   const participantRows = fundPeople(fund).map(person => {
@@ -366,9 +355,8 @@ function renderDetail() {
   const people = fundPeople(fund).filter(person => payableMemberIds(fund).includes(person.id)), count = paidCount(fund), payer = state.members.find(member => member.id === fund.payerId); byId("detail-date").textContent = `${dateLabel(fund.date)} · ${fund.splitMode === "itemized" ? "ITEMIZED ORDER" : "SPLIT FUND"}`; byId("detail-title").textContent = fund.title;
   byId("detail-description").innerHTML = sanitizeDescriptionHtml(fund.description) || "No description added.";
   byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = fund.splitMode === "itemized" ? `Itemized · paid by ${payer?.nickname || payer?.name || "a member"}` : `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${people.length} paid`;
-  byId("assigned-orders").innerHTML = assignedOrdersMarkup(fund);
   byId("detail-receipt").hidden = !fund.receipt; if (fund.receipt) byId("detail-receipt-image").src = fund.receipt;
-  byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]), amount = memberShare(fund, person.id); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(amount)} ${fund.splitMode === "itemized" ? `owed to ${escapeHtml(payer?.nickname || payer?.name || "payer")}` : "share"}</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false;
+  byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]), amount = memberShare(fund, person.id), assignedItems = fund.splitMode === "itemized" ? (fund.items || []).filter(item => (item.memberIds || []).includes(person.id)) : [], itemMarkup = assignedItems.length ? `<small class="payment-order-lines"><b>Order:</b> ${assignedItems.map(item => `${escapeHtml(item.name)} · ${money(Number(item.amount) / Math.max(1, item.memberIds?.length || 1))}`).join(" &nbsp;·&nbsp; ")}</small>` : ""; return `<div class="payment-row ${assignedItems.length ? "has-assigned-items" : ""}"><span class="avatar">${initials(person.name)}</span><span class="payment-copy"><strong>${escapeHtml(person.name)}</strong><small>${money(amount)} ${fund.splitMode === "itemized" ? `owed to ${escapeHtml(payer?.nickname || payer?.name || "payer")}` : "share"}</small>${itemMarkup}</span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false;
 }
 
 installDescriptionEditor();
