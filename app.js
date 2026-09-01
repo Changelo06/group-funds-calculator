@@ -1,5 +1,5 @@
 const currency = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
-let state = { members: [], funds: [] }, activeRoute = "overview", activeFilter = "all", activeSort = "date", editingFundId = null, activeFundId = null, currentReceipt = null, calculatorExpression = "";
+let state = { members: [], funds: [] }, activeRoute = "overview", activeFilter = "all", activeSort = "date", activeSortDirection = "desc", activeOwnership = "all", editingFundId = null, activeFundId = null, currentReceipt = null, calculatorExpression = "";
 let sharedFundId = new URLSearchParams(location.search).get("fund") || "", forceSharedProfile = Boolean(sharedFundId), forceProfileSelection = true;
 const byId = id => document.getElementById(id);
 const dateInput = byId("fund-date"); dateInput.value = new Date().toISOString().slice(0, 10);
@@ -20,15 +20,15 @@ const openFunds = () => state.funds.filter(fund => !settled(fund));
 const postedAt = fund => String(fund.createdAt || fund.updatedAt || `${fund.date || ""}T12:00:00`);
 const postedAge = fund => { const date = new Date(postedAt(fund)); if (Number.isNaN(date.getTime())) return "recently"; const days = Math.max(0, Math.floor((Date.now() - date.getTime()) / 86400000)); return days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`; };
 const posterName = fund => (state.members.find(member => member.id === (fund.createdById || "member-1")) || { name:"Chan" }).name;
-const sortFunds = (funds, sort = activeSort) => [...funds].sort((a,b) => { if (sort === "name") return a.title.localeCompare(b.title) || postedAt(b).localeCompare(postedAt(a)); if (sort === "member") return posterName(a).localeCompare(posterName(b)) || a.title.localeCompare(b.title); return postedAt(b).localeCompare(postedAt(a)); });
+const sortFunds = (funds, sort = activeSort) => { const sorted = [...funds].sort((a,b) => { if (sort === "name") return a.title.localeCompare(b.title) || postedAt(b).localeCompare(postedAt(a)); if (sort === "member") return posterName(a).localeCompare(posterName(b)) || a.title.localeCompare(b.title); return postedAt(a).localeCompare(postedAt(b)); }); return activeSortDirection === "asc" ? sorted : sorted.reverse(); };
 function showToast(message) { const toast = byId("toast"); toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), 2800); }
 async function api(url, options = {}) { const response = await fetch(url, { ...options, headers:{ "Content-Type":"application/json", ...(options.headers || {}) } }), text = await response.text(), contentType = response.headers.get("content-type") || ""; if (!response.ok) { const body = contentType.includes("application/json") ? JSON.parse(text || "{}") : {}; throw new Error(body.error || "Could not save your changes."); } if (!contentType.includes("application/json")) { if (/continue with vercel|log in to vercel|vercel authentication/i.test(text)) throw new Error("This Vercel deployment is protected. Disable Vercel Authentication for the public app."); throw new Error("The shared-data service returned an unexpected response."); } try { return JSON.parse(text); } catch { throw new Error("The shared-data service returned invalid data."); } }
 async function loadState(silent = false) { try { const [nextState, health] = await Promise.all([api("/api/state"), api("/api/health")]); state = nextState; if (sharedFundId && state.funds.some(fund => fund.id === sharedFundId)) activeFundId = sharedFundId; const needsSharedStorage = /\.vercel\.app$/i.test(location.hostname) && health.storage !== "redis"; document.querySelector(".connection").classList.toggle("online", !needsSharedStorage); byId("connection-status").textContent = needsSharedStorage ? "Shared storage needs setup" : "Live sync on"; render(); if (needsSharedStorage && !silent) showToast("Shared storage is not connected. Complete the Vercel checklist before adding funds."); } catch (error) { document.querySelector(".connection").classList.remove("online"); byId("connection-status").textContent = "Shared data unavailable"; if (!silent) showToast(error.message || "Could not reach the shared expense data."); } }
 function legacy_render_1() { renderNavigation(); renderOverview(); renderFunds(); renderMembers(); if (activeFundId) renderDetail(); }
 function legacy_renderNavigation_1() { byId("open-nav-count").textContent = openFunds().length; document.querySelectorAll(".nav-link, .tab-link").forEach(link => link.classList.toggle("active", link.dataset.route === activeRoute)); }
 function legacy_fundsHtml_1(funds, emptyTitle, emptyCopy) { if (!funds.length) return `<div class="empty-state"><b>${emptyTitle}</b>${emptyCopy}<br><button class="primary-button" type="button" data-open-fund>＋ Add split fund</button></div>`; return funds.map(fund => { const count = paidCount(fund), people = fund.memberIds.length, done = settled(fund), percent = people ? count / people * 100 : 0; return `<button class="fund-row" data-fund-id="${fund.id}" type="button"><span class="fund-icon">${fund.icon || "◈"}</span><span class="fund-copy"><strong>${escapeHtml(fund.title)}</strong><small>${escapeHtml(fund.description || "No description")}</small></span><span class="fund-meta"><b>${dateLabel(fund.date)}</b>${people} member${people === 1 ? "" : "s"}</span><span class="payment-progress"><span class="progress-caption"><span>${count}/${people} paid</span><b>${Math.round(percent)}%</b></span><span class="progress"><i style="width:${percent}%"></i></span></span><span class="fund-amount">${money(fund.total)}</span><span class="status-pill ${done ? "settled" : ""}">${done ? "Settled" : "Open"}</span><span class="row-arrow">›</span></button>`; }).join(""); }
-function renderOverview() { const open = openFunds(), openTotal = open.reduce((sum,fund) => sum + Number(fund.total),0), awaiting = open.reduce((sum,fund) => sum + payableMemberIds(fund).length - paidCount(fund),0), done = state.funds.filter(settled).length; byId("stat-grid").innerHTML = [["Open to collect",money(openTotal),`${open.length} open fund${open.length === 1 ? "" : "s"}`,"open"],["Payments awaiting",awaiting,awaiting ? "Mark payments as they come in" : "Everyone is up to date",awaiting ? "open":"ok"],["Fully settled",done,`${state.funds.length} total split fund${state.funds.length === 1 ? "" : "s"}`,"ok"]].map(([label,value,caption,kind]) => `<article class="stat-card"><span>${label}</span><strong>${value}</strong><small class="${kind}">${caption}</small></article>`).join(""); byId("recent-funds").innerHTML = fundsHtml(sortFunds(state.funds).slice(0,4), "No split funds yet", "Add your first shared purchase to get started."); }
-function renderFunds() { const all = state.funds, open = all.filter(fund => !settled(fund)), closed = all.filter(settled); byId("all-count").textContent = all.length; byId("open-count").textContent = open.length; byId("settled-count").textContent = closed.length; byId("fund-sort").value = activeSort; const query = byId("fund-search").value.trim().toLowerCase(); let funds = activeFilter === "open" ? open : activeFilter === "settled" ? closed : all; if (query) funds = funds.filter(fund => `${fund.title} ${fund.description || ""}`.toLowerCase().includes(query)); byId("funds-list").innerHTML = fundsHtml(sortFunds(funds), query ? "No matching funds" : "No funds in this view", query ? "Try another word or clear the search." : "Create a split fund to start tracking the house expenses."); document.querySelectorAll(".filter").forEach(button => button.classList.toggle("active", button.dataset.filter === activeFilter)); }
+function renderOverview() { const profile = currentProfile(), open = openFunds(), toPay = profile ? memberUnpaidFunds(profile.id) : [], collections = profile ? open.map(fund => ({ fund, amount:payableMemberIds(fund).filter(id => id !== profile.id && !fund.payments?.[id]).reduce((sum,id) => sum + memberShare(fund,id),0), waiting:payableMemberIds(fund).filter(id => id !== profile.id && !fund.payments?.[id]).length })).filter(item => item.amount > 0 && fundCreatorId(item.fund) === profile.id) : [], collectTotal = collections.reduce((sum,item) => sum + item.amount,0), awaiting = collections.reduce((sum,item) => sum + item.waiting, 0), done = profile ? state.funds.filter(fund => fundCreatorId(fund) === profile.id && settled(fund)).length : 0; byId("stat-grid").innerHTML = [["Open to collect",money(collectTotal),collections.length ? `${collections.length} active collection${collections.length === 1 ? "" : "s"}` : "No active collections",collections.length ? "open":"ok"],["To pay",toPay.length,toPay.length ? `${money(memberOwed(profile?.id))} across your open funds` : "You are all caught up",toPay.length ? "open":"ok"],["Payments waiting",awaiting,awaiting ? "Payments due to you" : "Nothing is waiting",awaiting ? "open":"ok"],["Settled",done,done ? "Your completed collections" : "No completed collections","ok"]].map(([label,value,caption,kind]) => `<article class="stat-card"><span>${label}</span><strong>${value}</strong><small class="${kind}">${caption}</small></article>`).join(""); byId("recent-funds").innerHTML = fundsHtml(sortFunds(state.funds).slice(0,4), "No split funds yet", "Add your first shared purchase to get started."); }
+function renderFunds() { const all = state.funds, open = all.filter(fund => !settled(fund)), closed = all.filter(settled), profileId = currentProfile()?.id; byId("all-count").textContent = all.length; byId("open-count").textContent = open.length; byId("settled-count").textContent = closed.length; byId("fund-sort").value = activeSort; byId("fund-sort-direction").textContent = activeSortDirection === "asc" ? "↑" : "↓"; byId("fund-sort-direction").setAttribute("aria-label", `Sort ${activeSortDirection === "asc" ? "ascending" : "descending"}`); const query = byId("fund-search").value.trim().toLowerCase(); let funds = activeFilter === "open" ? open : activeFilter === "settled" ? closed : all; if (activeOwnership === "yours") funds = funds.filter(fund => fundCreatorId(fund) === profileId); if (activeOwnership === "others") funds = funds.filter(fund => fundCreatorId(fund) !== profileId); if (query) funds = funds.filter(fund => `${fund.title} ${fund.description || ""} ${posterName(fund)}`.toLowerCase().includes(query)); byId("funds-list").innerHTML = fundsHtml(sortFunds(funds), query ? "No matching funds" : "No funds in this view", query ? "Try another word or clear the search." : "Create a split fund to start tracking the house expenses."); document.querySelectorAll(".filter").forEach(button => button.classList.toggle("active", button.dataset.filter === activeFilter)); document.querySelectorAll("[data-fund-owner]").forEach(button => button.classList.toggle("active", button.dataset.fundOwner === activeOwnership)); }
 function legacy_renderMembers_1() { byId("member-total").textContent = `${state.members.length} house member${state.members.length === 1 ? "" : "s"}`; byId("members-list").innerHTML = state.members.map(member => `<article class="member-card"><span class="avatar">${initials(member.name)}</span><span><b>${escapeHtml(member.name)}</b><small>${memberFundCount(member.id)} split fund${memberFundCount(member.id) === 1 ? "" : "s"}</small></span><button type="button" data-delete-member="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">×</button></article>`).join("") || `<div class="empty-state"><b>No members yet</b>Add your housemates before creating a fund.</div>`; }
 const memberFundCount = id => state.funds.filter(fund => fund.memberIds.includes(id)).length;
 function legacy_showRoute_1(route) { activeRoute = route; ["overview","funds","members"].forEach(name => byId(`${name}-view`).hidden = name !== route); if (window.location.hash.slice(1) !== route) window.location.hash = route; renderNavigation(); if(route === "funds") renderFunds(); }
@@ -43,7 +43,7 @@ function renderCalculator() { byId("calculator-display").textContent = calculato
 function legacy_useCalculatorKey_1(key) { if (key === "clear") calculatorExpression = ""; else if (key === "back") calculatorExpression = calculatorExpression.slice(0, -1); else if (key === "equals") { if (!calculatorExpression || !/^[0-9+\-*/.\s]+$/.test(calculatorExpression)) return showToast("Use valid numbers and calculator operators."); try { const result = Function(`"use strict"; return (${calculatorExpression})`)(); if (!Number.isFinite(result)) throw new Error(); const rounded = Math.round(result * 100) / 100; calculatorExpression = String(rounded); byId("fund-total").value = rounded; updateFundPreview(); } catch { return showToast("That calculation cannot be solved."); } } else { const operators = "+-*/"; const last = calculatorExpression.slice(-1); if (operators.includes(key) && (!calculatorExpression || operators.includes(last))) { if (key === "-" && !calculatorExpression) calculatorExpression = "-"; else if (calculatorExpression) calculatorExpression = calculatorExpression.slice(0,-1) + key; } else if (key === ".") { const currentNumber = calculatorExpression.split(/[+\-*/]/).pop(); if (!currentNumber.includes(".")) calculatorExpression += key; } else calculatorExpression += key; renderCalculator(); } }
 async function compressReceipt(file) { if (!file || !file.type.startsWith("image/")) throw new Error("Choose a PNG, JPEG, or WebP receipt image."); const source = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error("The receipt could not be read.")); reader.readAsDataURL(file); }); const image = await new Promise((resolve,reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = () => reject(new Error("The receipt image could not be opened.")); element.src = source; }); const scale = Math.min(1, 1000 / Math.max(image.width, image.height)); const canvas = document.createElement("canvas"); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale); canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height); let encoded = canvas.toDataURL("image/jpeg", .76); if (encoded.length > 850000) { canvas.width = Math.round(canvas.width * .78); canvas.height = Math.round(canvas.height * .78); canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height); encoded = canvas.toDataURL("image/jpeg", .62); } if (encoded.length > 900000) throw new Error("That receipt is still too large. Please use a smaller image."); return encoded; }
 document.addEventListener("click", async event => { const route = event.target.closest("[data-route]"); if (route) { event.preventDefault(); showRoute(route.dataset.route); return; } if (event.target.closest("[data-open-fund]") || event.target.closest("#mobile-add")) return openFundModal(); if (event.target.closest("[data-open-member]")) return openMemberModal(); if (event.target.closest("[data-close-modal]")) return closeModals(); const filter = event.target.closest(".filter"); if(filter) { activeFilter = filter.dataset.filter; renderFunds(); return; } const row = event.target.closest("[data-fund-id]"); if(row) { activeFundId = row.dataset.fundId; renderDetail(); return; } const pay = event.target.closest("[data-toggle-payment]"); if(pay) { const fund = state.funds.find(item => item.id === activeFundId); try { state = await api(`/api/funds/${fund.id}/payments`, { method:"PATCH", body:JSON.stringify({ memberId: pay.dataset.togglePayment, paid: !fund.payments?.[pay.dataset.togglePayment] }) }); render(); } catch(error) { showToast(error.message); } return; } const remove = event.target.closest("[data-delete-member]"); if(remove) { const member = state.members.find(item => item.id === remove.dataset.deleteMember); if (!confirm(`Remove ${member.name}? They will stay on past split funds as a former member.`)) return; try { state = await api(`/api/members/${member.id}`,{method:"DELETE"}); render(); showToast("Member removed."); } catch(error) { showToast(error.message); } } });
-byId("fund-search").addEventListener("input", renderFunds); byId("fund-sort").addEventListener("change", event => { activeSort = event.target.value; renderFunds(); }); byId("fund-total").addEventListener("input", updateFundPreview); byId("fund-member-select").addEventListener("change", updateFundPreview); byId("select-all-members").addEventListener("change", event => { document.querySelectorAll(".member-choice input").forEach(input => input.checked = event.target.checked); updateFundPreview(); });
+byId("fund-search").addEventListener("input", renderFunds); byId("fund-sort").addEventListener("change", event => { activeSort = event.target.value; renderFunds(); }); byId("fund-sort-direction").addEventListener("click", () => { activeSortDirection = activeSortDirection === "asc" ? "desc" : "asc"; renderFunds(); }); byId("fund-total").addEventListener("input", updateFundPreview); byId("fund-member-select").addEventListener("change", updateFundPreview); byId("select-all-members").addEventListener("change", event => { document.querySelectorAll(".member-choice input").forEach(input => input.checked = event.target.checked); updateFundPreview(); });
 byId("fund-form").addEventListener("submit", async event => { event.preventDefault(); const memberIds = [...document.querySelectorAll(".member-choice input:checked")].map(input => input.value); if (!memberIds.length) return showToast("Select at least one member."); const payload = { title:byId("fund-title").value.trim(), description:byId("fund-description").value.trim(), date:byId("fund-date").value, total:Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID }; try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); showToast(message); } catch(error) { showToast(error.message); } });
 byId("member-form").addEventListener("submit", async event => { event.preventDefault(); const name = byId("member-name").value.trim(); try { state = await api("/api/members", {method:"POST",body:JSON.stringify({name})}); const newMember = state.members.at(-1); byId("member-modal").hidden = true; render(); if (!byId("fund-modal").hidden) refreshFundMemberChoices(newMember?.id); showToast(`${name} was added.`); } catch(error) { showToast(error.message); } });
 byId("edit-fund").addEventListener("click", () => { const fund = state.funds.find(item => item.id === activeFundId); byId("detail-modal").hidden = true; openFundModal(fund); });
@@ -337,11 +337,36 @@ byId("fund-form").addEventListener("submit", async event => {
   try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); showToast(message); } catch(error) { showToast(error.message); }
 }, true);
 
+function assignedOrdersMarkup(fund) {
+  const payer = fundPerson(fund, fund.payerId);
+  return `<div class="detail-heading assigned-orders-heading"><span>${fund.splitMode === "itemized" ? "ASSIGNED ORDERS" : "SPLIT ASSIGNMENTS"}</span></div><div class="assigned-order-list">${fundPeople(fund).map(person => {
+    const items = fund.splitMode === "itemized" ? (fund.items || []).filter(item => (item.memberIds || []).includes(person.id)) : [];
+    const paid = Boolean(fund.payments?.[person.id]), payerCovered = fund.splitMode === "itemized" && person.id === fund.payerId;
+    const status = payerCovered ? "Covered as payer" : paid ? "Paid" : "Unpaid";
+    const itemLines = items.length ? `<ul>${items.map(item => `<li>${escapeHtml(item.name)} <b>${money(Number(item.amount) / Math.max(1, item.memberIds?.length || 1))}</b></li>`).join("")}</ul>` : `<p>${fund.splitMode === "itemized" ? "No individual items assigned." : "Equal share of the bill."}</p>`;
+    return `<article class="assigned-order"><div><b>${escapeHtml(person.nickname || person.name)}</b><small class="${paid || payerCovered ? "paid" : "unpaid"}">${status}</small></div>${itemLines}<strong>Amount: ${money(memberShare(fund, person.id))}</strong>${fund.splitMode === "itemized" && !payerCovered ? `<small>Pay to ${escapeHtml(payer.nickname || payer.name)}</small>` : ""}</article>`;
+  }).join("")}</div>`;
+}
+
+function generateReceipt(fund) {
+  const creator = fundPerson(fund, fundCreatorId(fund)), receiver = fund.splitMode === "itemized" ? fundPerson(fund, fund.payerId) : creator, qr = paymentMethods(receiver)[0];
+  const participantRows = fundPeople(fund).map(person => {
+    const items = fund.splitMode === "itemized" ? (fund.items || []).filter(item => (item.memberIds || []).includes(person.id)).map(item => `${escapeHtml(item.name)} (${money(Number(item.amount) / Math.max(1, item.memberIds?.length || 1))})`).join(", ") : "Equal share";
+    const payerCovered = fund.splitMode === "itemized" && person.id === fund.payerId, status = payerCovered ? "Covered as payer" : fund.payments?.[person.id] ? "Paid" : "Unpaid";
+    return `<tr><td>${escapeHtml(person.nickname || person.name)}</td><td>${items || "No item assigned"}</td><td>${money(memberShare(fund, person.id))}</td><td>${status}</td></tr>`;
+  }).join("");
+  const receipt = window.open("", "_blank", "noopener,noreferrer,width=720,height=850");
+  if (!receipt) return showToast("Allow pop-ups to generate a receipt.");
+  receipt.document.write(`<!doctype html><html><head><title>${escapeHtml(fund.title)} receipt</title><style>body{margin:0;padding:32px;color:#111;font:14px Arial,sans-serif}h1{margin:0 0 6px;font-size:24px}p{color:#555}table{width:100%;border-collapse:collapse;margin:24px 0}th,td{padding:10px 6px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}th{font-size:11px;text-transform:uppercase;color:#666}.total{font-size:20px;font-weight:700}.qr{max-width:180px;max-height:180px;margin-top:12px}@media print{body{padding:20px}}</style></head><body><h1>${escapeHtml(fund.title)}</h1><p>Created by ${escapeHtml(creator.nickname || creator.name)} · ${escapeHtml(dateLabel(fund.date))}</p><table><thead><tr><th>Participant</th><th>Orders</th><th>Total</th><th>Status</th></tr></thead><tbody>${participantRows}</tbody></table><p class="total">Overall total: ${money(fund.total)}</p><p>Payable to: <b>${escapeHtml(receiver.nickname || receiver.name)}</b></p>${qr ? `<img class="qr" src="${escapeHtml(qr.image)}" alt="${escapeHtml(qr.label)} QR code" /><p>${escapeHtml(qr.label)}</p>` : "<p>No payment QR code has been added for this receiving profile.</p>"}<script>window.onload=()=>window.print()<\/script></body></html>`);
+  receipt.document.close();
+}
+
 function renderDetail() {
   const fund = state.funds.find(item => item.id === activeFundId); if (!fund) return closeModals();
   const people = fundPeople(fund).filter(person => payableMemberIds(fund).includes(person.id)), count = paidCount(fund), payer = state.members.find(member => member.id === fund.payerId); byId("detail-date").textContent = `${dateLabel(fund.date)} · ${fund.splitMode === "itemized" ? "ITEMIZED ORDER" : "SPLIT FUND"}`; byId("detail-title").textContent = fund.title;
   byId("detail-description").innerHTML = sanitizeDescriptionHtml(fund.description) || "No description added.";
   byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = fund.splitMode === "itemized" ? `Itemized · paid by ${payer?.nickname || payer?.name || "a member"}` : `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${people.length} paid`;
+  byId("assigned-orders").innerHTML = assignedOrdersMarkup(fund);
   byId("detail-receipt").hidden = !fund.receipt; if (fund.receipt) byId("detail-receipt-image").src = fund.receipt;
   byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]), amount = memberShare(fund, person.id); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(amount)} ${fund.splitMode === "itemized" ? `owed to ${escapeHtml(payer?.nickname || payer?.name || "payer")}` : "share"}</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false;
 }
@@ -433,8 +458,11 @@ function legacy_openProfilePicker_2() {
   byId("profile-modal").hidden = false;
 }
 
-async function compressMemberPhoto(file, size = 120) {
-  if (!file || !file.type.startsWith("image/")) throw new Error("Choose a PNG, JPEG, or WebP photo.");
+async function compressMemberPhoto(file, size = 120, kind = "profile") {
+  if (!file) throw new Error("Choose an image to upload.");
+  if (file.size > 2 * 1024 * 1024) throw new Error(`${kind === "profile" ? "Profile photos" : "QR images"} must be 2 MB or smaller.`);
+  const accepted = kind === "profile" ? ["image/jpeg"] : ["image/png", "image/jpeg", "image/webp"];
+  if (!accepted.includes(file.type)) throw new Error(kind === "profile" ? "Profile photos must be JPG or JPEG files." : "QR images must be PNG, JPG, JPEG, or WebP files.");
   const source = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error("The photo could not be read.")); reader.readAsDataURL(file); });
   const image = await new Promise((resolve, reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = () => reject(new Error("The photo could not be opened.")); element.src = source; });
   const crop = Math.min(image.width, image.height), left = (image.width - crop) / 2, top = (image.height - crop) / 2, canvas = document.createElement("canvas");
@@ -473,12 +501,11 @@ const canManageMember = member => isAdmin() || currentProfile()?.id === member.i
 
 function ensureMemberContactField() {
   if (byId("member-contact")) return;
-  byId("member-name").closest("label").insertAdjacentHTML("afterend", `<label><span>Nickname <em>optional</em></span><input id="member-nickname" maxlength="30" placeholder="How you want to be known" /></label><label><span>Profile label <em>optional</em></span><input id="member-label" maxlength="40" placeholder="e.g. Rent coordinator" /></label><label><span>Contact <em>optional</em></span><input id="member-contact" maxlength="80" placeholder="Phone, email, or contact note" autocomplete="email" /></label>`);
+  byId("member-name").closest("label").insertAdjacentHTML("afterend", `<label><span>Nickname <em>optional</em></span><input id="member-nickname" maxlength="30" placeholder="How you want to be known" /></label><label><span>Profile label <em>optional</em></span><input id="member-label" maxlength="40" placeholder="e.g. Rent coordinator" /></label><label><span>Contact <em>optional</em></span><input id="member-contact" maxlength="80" placeholder="Phone, email, or contact note" autocomplete="email" /></label><label><span>Member ID color</span><select id="member-theme"><option value="sakura-pink">Sakura Pink</option><option value="wise-green">Wise Green</option><option value="gotyme-light-blue">GoTyme Light Blue</option><option value="royal-gray">Royal Gray</option><option value="maribank-orange">MariBank Orange</option><option value="maya-black">Maya Black</option><option value="bpi-maroon">BPI Maroon</option></select></label><button class="secondary-button manage-qr-button" type="button" data-manage-member-qr>Manage payment QR codes</button>`);
 }
 
 function openMemberModal(member = null) {
   ensureMemberContactField();
-  if (!member) return showToast("This group uses five fixed member profiles.");
   if (member && !canManageMember(member)) return showToast("You can only edit your own account.");
   editingMemberId = member?.id || null;
   byId("member-modal").hidden = false;
@@ -489,6 +516,7 @@ function openMemberModal(member = null) {
   byId("member-nickname").value = member?.nickname || "";
   byId("member-label").value = member?.label || "";
   byId("member-contact").value = member?.contact || "";
+  byId("member-theme").value = member?.theme || "maya-black";
   byId("member-form").querySelector("button[type=submit]").textContent = member ? "Save member" : "Add member";
   byId("member-name").focus();
 }
@@ -514,17 +542,24 @@ document.addEventListener("click", event => {
   if (profile) openMemberModal(profile);
 });
 
+document.addEventListener("click", event => {
+  if (!event.target.closest("[data-manage-member-qr]")) return;
+  const member = state.members.find(item => item.id === editingMemberId);
+  if (!member || !canManageMember(member)) return showToast("Open your own account to manage QR codes.");
+  byId("member-modal").hidden = true;
+  openPaymentProfile(member);
+});
+
 byId("member-form").addEventListener("submit", async event => {
   event.preventDefault();
   event.stopImmediatePropagation();
-  const name = byId("member-name").value.trim(), nickname = byId("member-nickname").value.trim(), label = byId("member-label").value.trim(), contact = byId("member-contact").value.trim();
+  const name = byId("member-name").value.trim(), nickname = byId("member-nickname").value.trim(), label = byId("member-label").value.trim(), contact = byId("member-contact").value.trim(), theme = byId("member-theme").value;
   const existing = editingMemberId ? state.members.find(member => member.id === editingMemberId) : null;
-  if (!editingMemberId) return showToast("This group uses five fixed member profiles.");
   if (existing && !canManageMember(existing)) return showToast("You can only manage your own account.");
   try {
     state = editingMemberId
-      ? await api(`/api/members/${editingMemberId}`, { method:"PATCH", body:JSON.stringify({ name, nickname, label, contact, avatar:existing.avatar || "", paymentMethods:existing.paymentMethods || [] }) })
-      : await api("/api/members", { method:"POST", body:JSON.stringify({ name, nickname, label, contact, avatar:"", paymentMethods:[] }) });
+      ? await api(`/api/members/${editingMemberId}`, { method:"PATCH", body:JSON.stringify({ name, nickname, label, contact, theme, avatar:existing.avatar || "", paymentMethods:existing.paymentMethods || [] }) })
+      : await api("/api/members", { method:"POST", body:JSON.stringify({ name, nickname, label, contact, theme, avatar:"", paymentMethods:[] }) });
     const newMember = editingMemberId ? null : state.members.at(-1);
     editingMemberId = null;
     byId("member-modal").hidden = true;
@@ -535,20 +570,23 @@ byId("member-form").addEventListener("submit", async event => {
 }, true);
 
 function paymentMethods(member) { return Array.isArray(member.paymentMethods) ? member.paymentMethods : []; }
-function paymentMethodHtml(method, editable) { return `<article class="payment-method-card"><img src="${escapeHtml(method.image)}" alt="${escapeHtml(method.label)} QR code" loading="lazy" decoding="async" /><span><b>${escapeHtml(method.label)}</b><small>Scan to pay</small></span>${editable ? `<button type="button" data-remove-payment-method="${escapeHtml(method.id)}">Remove</button>` : ""}</article>`; }
+function paymentMethodHtml(method, editable) { return `<article class="payment-method-card"><button type="button" class="qr-thumbnail" data-open-qr="${escapeHtml(method.id)}" aria-label="Open ${escapeHtml(method.label)} QR code"><img src="${escapeHtml(method.image)}" alt="${escapeHtml(method.label)} QR code" loading="lazy" decoding="async" /></button><span><b>${escapeHtml(method.label)}</b><small>Scan to pay</small></span>${editable ? `<span class="payment-method-actions"><button type="button" data-replace-payment-method="${escapeHtml(method.id)}">Replace</button><button type="button" data-remove-payment-method="${escapeHtml(method.id)}">Remove</button></span>` : ""}</article>`; }
+let editingPaymentMethodId = "";
 
 function ensurePaymentDialog() {
   if (byId("payment-profile-modal")) return;
-  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop" id="payment-profile-modal" hidden><section class="modal payment-profile-modal-card"><div class="modal-header"><div><h2 id="payment-profile-name">Payment profile</h2><p class="detail-description" id="payment-profile-copy"></p></div><button class="close-button" type="button" data-close-modal aria-label="Close">×</button></div><div class="payment-method-list" id="payment-method-list"></div><div id="payment-method-form-wrap" hidden><form id="payment-method-form"><label><span>Bank or wallet</span><input id="payment-method-label" maxlength="30" required placeholder="e.g. GCash · Chan" /></label><label class="qr-upload-label"><span>QR code image</span><input id="payment-method-image" type="file" accept="image/png,image/jpeg,image/webp" required /></label><div class="modal-actions"><button type="button" class="cancel-button" data-close-modal>Cancel</button><button type="submit" class="primary-button">Save QR code</button></div></form></div><div class="detail-actions"><span></span><button type="button" class="secondary-button" id="add-payment-method" hidden>＋ Add QR code</button></div></section></div>`);
+  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop" id="payment-profile-modal" hidden><section class="modal payment-profile-modal-card"><div class="modal-header"><div><h2 id="payment-profile-name">Payment profile</h2><p class="detail-description" id="payment-profile-copy"></p></div><button class="close-button" type="button" data-close-modal aria-label="Close">×</button></div><div class="payment-method-list" id="payment-method-list"></div><div id="payment-method-form-wrap" hidden><form id="payment-method-form"><label><span>Bank or wallet</span><input id="payment-method-label" maxlength="30" required placeholder="e.g. GCash · Chan" /></label><label class="qr-upload-label"><span>QR code image</span><input id="payment-method-image" type="file" accept="image/png,image/jpeg,image/webp" required /></label><small class="upload-help">PNG, JPG, JPEG, or WebP · up to 2 MB</small><div class="modal-actions"><button type="button" class="cancel-button" data-close-modal>Cancel</button><button type="submit" class="primary-button" id="save-payment-method">Save QR code</button></div></form></div><div class="detail-actions"><span></span><button type="button" class="secondary-button" id="add-payment-method" hidden>＋ Add QR code</button></div></section></div><div class="modal-backdrop" id="qr-preview-modal" hidden><section class="modal qr-preview-card"><button class="close-button" type="button" data-close-modal aria-label="Close">×</button><h2 id="qr-preview-title">Payment QR</h2><img id="qr-preview-image" alt="Payment QR code" /></section></div>`);
   byId("payment-method-form").addEventListener("submit", async event => {
     event.preventDefault();
     const member = state.members.find(item => item.id === byId("payment-profile-modal").dataset.memberId);
     if (!member || !canManageMember(member)) return showToast("You can only update your own payment profile.");
     try {
-      const image = await compressMemberPhoto(byId("payment-method-image").files?.[0], 180);
-      const methods = [...paymentMethods(member), { id:crypto.randomUUID(), label:byId("payment-method-label").value.trim(), image }];
+      const isReplacement = Boolean(editingPaymentMethodId);
+      if (!isReplacement && paymentMethods(member).length >= 3) return showToast("Each profile can keep up to 3 QR codes.");
+      const image = await compressMemberPhoto(byId("payment-method-image").files?.[0], 720, "qr"), label = byId("payment-method-label").value.trim();
+      const methods = isReplacement ? paymentMethods(member).map(method => method.id === editingPaymentMethodId ? { ...method, label, image } : method) : [...paymentMethods(member), { id:crypto.randomUUID(), label, image }];
       state = await api(`/api/members/${member.id}`, { method:"PATCH", body:JSON.stringify({ ...accountPayload(member), paymentMethods:methods }) });
-      render(); openPaymentProfile(state.members.find(item => item.id === member.id)); showToast("QR code added.");
+      render(); openPaymentProfile(state.members.find(item => item.id === member.id)); showToast(isReplacement ? "QR code replaced." : "QR code added.");
     } catch (error) { showToast(error.message); }
   });
 }
@@ -560,6 +598,9 @@ function openPaymentProfile(member) {
   byId("payment-profile-name").textContent = `${name}'s payment profile`;
   byId("payment-profile-copy").textContent = paymentMethods(member).length ? `Use a listed QR code to pay ${name}. ${open.length ? `${open.length} shared expense${open.length === 1 ? " is" : "s are"} still open.` : "No unpaid shared expenses."}` : `${name} has not added a payment QR code yet.`;
   byId("payment-method-list").innerHTML = paymentMethods(member).map(method => paymentMethodHtml(method, editable)).join("") || `<div class="empty-state"><b>No QR codes yet</b>${editable ? "Add a bank or wallet code so other members can pay you quickly." : "Ask this member to add a payment method."}</div>`;
+  editingPaymentMethodId = "";
+  byId("payment-method-form").reset();
+  byId("save-payment-method").textContent = "Save QR code";
   byId("payment-method-form-wrap").hidden = true;
   byId("add-payment-method").hidden = !editable || paymentMethods(member).length >= 3;
   byId("payment-profile-modal").hidden = false;
@@ -568,7 +609,7 @@ function openPaymentProfile(member) {
 function renderMore() {
   const profile = currentProfile(), unpaid = profile ? memberUnpaidFunds(profile.id) : [], owed = profile ? memberOwed(profile.id) : 0;
   byId("tracker-title").textContent = profile ? `${profile.nickname || profile.name}'s tracker` : "My payments";
-  byId("profile-summary").innerHTML = profile ? `<span class="avatar">${accountAvatarContent(profile)}</span><span><b>${escapeHtml(profile.nickname || profile.name)}</b><small>${unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"} · ${money(owed)} to pay` : "You are all caught up"}</small></span><span class="profile-summary-actions"><button type="button" data-edit-current-profile>Edit my details</button><button type="button" data-view-payment-profile="${profile.id}">Payment profile</button></span>` : `<span class="avatar">?</span><span><b>No member selected</b><small>Select who is using this device to see their tracker.</small></span><button type="button" data-open-profile>Choose</button>`;
+  byId("profile-summary").innerHTML = profile ? `<span class="avatar">${accountAvatarContent(profile)}</span><span><b>${escapeHtml(profile.nickname || profile.name)}</b><small>${unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"} · ${money(owed)} to pay` : "You are all caught up"}</small></span><span class="profile-summary-actions"><button type="button" data-edit-current-profile>Edit my details</button><button type="button" data-open-profile>Switch accounts</button></span>` : `<span class="avatar">?</span><span><b>No member selected</b><small>Select who is using this device to see their tracker.</small></span><button type="button" data-open-profile>Choose</button>`;
   byId("unpaid-count").textContent = unpaid.length;
   byId("personal-unpaid-list").innerHTML = unpaid.length ? unpaid.map(profileFundHtml).join("") : `<div class="empty-state"><b>${profile ? "All caught up" : "Choose a member"}</b>${profile ? "There are no unpaid split funds for this profile." : "Select a profile to see personal payment reminders."}</div>`;
   byId("member-status-list").innerHTML = state.members.map(member => { const awaiting = memberUnpaidFunds(member.id), owedAmount = memberOwed(member.id); return `<article class="member-status-card"><span class="avatar">${accountAvatarContent(member)}</span><span><b>${escapeHtml(member.nickname || member.name)}${profile?.id === member.id ? " (you)" : ""}</b><small class="${awaiting.length ? "owing" : ""}">${awaiting.length ? `${awaiting.length} unpaid · ${money(owedAmount)} to pay` : "All paid up"}</small></span></article>`; }).join("") || `<div class="empty-state"><b>No members yet</b>Add housemates to start tracking payments.</div>`;
@@ -577,11 +618,16 @@ function renderMore() {
 document.addEventListener("click", async event => {
   const viewButton = event.target.closest("[data-view-payment-profile]");
   if (viewButton) { const member = state.members.find(item => item.id === viewButton.dataset.viewPaymentProfile); if (member) openPaymentProfile(member); return; }
-  if (event.target.closest("#add-payment-method")) { byId("payment-method-form-wrap").hidden = false; byId("payment-method-label").focus(); return; }
+  if (event.target.closest("#add-payment-method")) { editingPaymentMethodId = ""; byId("payment-method-form").reset(); byId("save-payment-method").textContent = "Save QR code"; byId("payment-method-form-wrap").hidden = false; byId("payment-method-label").focus(); return; }
+  const replaceButton = event.target.closest("[data-replace-payment-method]");
+  if (replaceButton) { const member = state.members.find(item => item.id === byId("payment-profile-modal").dataset.memberId), method = paymentMethods(member || {}).find(item => item.id === replaceButton.dataset.replacePaymentMethod); if (!member || !method || !canManageMember(member)) return showToast("You can only update your own payment profile."); editingPaymentMethodId = method.id; byId("payment-method-label").value = method.label; byId("payment-method-image").value = ""; byId("payment-method-form-wrap").hidden = false; byId("save-payment-method").textContent = "Replace QR code"; return; }
+  const qrButton = event.target.closest("[data-open-qr]");
+  if (qrButton) { const member = state.members.find(item => item.id === byId("payment-profile-modal").dataset.memberId), method = paymentMethods(member || {}).find(item => item.id === qrButton.dataset.openQr); if (method) { byId("qr-preview-title").textContent = method.label; byId("qr-preview-image").src = method.image; byId("qr-preview-modal").hidden = false; } return; }
   const removeButton = event.target.closest("[data-remove-payment-method]");
   if (removeButton) {
     const member = state.members.find(item => item.id === byId("payment-profile-modal").dataset.memberId);
     if (!member || !canManageMember(member)) return showToast("You can only update your own payment profile.");
+    if (!window.confirm("Remove this QR code? This cannot be undone.")) return;
     try { state = await api(`/api/members/${member.id}`, { method:"PATCH", body:JSON.stringify({ ...accountPayload(member), paymentMethods:paymentMethods(member).filter(method => method.id !== removeButton.dataset.removePaymentMethod) }) }); render(); openPaymentProfile(state.members.find(item => item.id === member.id)); } catch (error) { showToast(error.message); }
   }
 });
@@ -591,12 +637,12 @@ function fundsHtml(funds, emptyTitle, emptyCopy) {
   return funds.map(fund => {
     const count = paidCount(fund), people = payableMemberIds(fund).length, done = settled(fund), remaining = Math.max(0, people - count);
     const summary = done ? "Settled" : `${remaining} ${remaining === 1 ? "person" : "people"} still to pay`;
-    const mine = fundCreatorId(fund) === currentProfile()?.id; return `<button class="fund-row ${mine ? "posted-by-you" : ""}" data-fund-id="${fund.id}" type="button"><span class="fund-icon">${fund.icon || "◈"}</span><span class="fund-copy"><strong>${escapeHtml(fund.title)}</strong><small>Posted ${postedAge(fund)} · ${mine ? "Posted by you · " : ""}${summary} · ${count}/${people} paid</small></span><span class="fund-meta"><b>${dateLabel(fund.date)}</b>${people} member${people === 1 ? "" : "s"}</span><span class="payment-progress"><span class="progress-caption"><span>${count}/${people} paid</span><b>${Math.round(people ? count / people * 100 : 0)}%</b></span><span class="progress"><i style="width:${people ? count / people * 100 : 0}%"></i></span></span><span class="fund-amount">${money(fund.total)}</span><span class="status-pill ${done ? "settled" : ""}">${done ? "Settled" : "Open"}</span><span class="row-arrow">›</span></button>`;
+    const mine = fundCreatorId(fund) === currentProfile()?.id, title = `${fund.title} by ${posterName(fund)}`; return `<button class="fund-row ${mine ? "posted-by-you" : ""} ${done ? "is-settled" : ""}" data-fund-id="${fund.id}" type="button"><span class="fund-icon">${fund.icon || "◈"}</span><span class="fund-copy"><strong>${done ? `<s>${escapeHtml(title)}</s>` : escapeHtml(title)}</strong><small>Posted ${postedAge(fund)} · ${mine ? "Posted by you · " : ""}${summary} · ${count}/${people} paid</small></span><span class="fund-meta"><b>${dateLabel(fund.date)}</b>${people} member${people === 1 ? "" : "s"}</span><span class="payment-progress"><span class="progress-caption"><span>${count}/${people} paid</span><b>${Math.round(people ? count / people * 100 : 0)}%</b></span><span class="progress"><i style="width:${people ? count / people * 100 : 0}%"></i></span></span><span class="fund-amount">${money(fund.total)}</span><span class="status-pill ${done ? "settled" : ""}">${done ? "Settled" : "Open"}</span><span class="row-arrow">›</span></button>`;
   }).join("");
 }
 
 const accountAvatarContent = member => member.avatar ? `<img src="${escapeHtml(member.avatar)}" alt="" loading="lazy" decoding="async" />` : memberAvatarContent(member);
-const accountPayload = member => ({ name:member.name, nickname:member.nickname || "", label:member.label || "", contact:member.contact || "", avatar:member.avatar || "", paymentMethods:member.paymentMethods || [] });
+const accountPayload = member => ({ name:member.name, nickname:member.nickname || "", label:member.label || "", contact:member.contact || "", theme:member.theme || "maya-black", avatar:member.avatar || "", paymentMethods:member.paymentMethods || [] });
 
 function renderProfileChrome() {
   const profile = currentProfile();
@@ -605,16 +651,26 @@ function renderProfileChrome() {
   byId("overview-greeting").textContent = profile ? `Good morning, ${profile.nickname || profile.name}` : "Welcome to Group Funds Calculator";
 }
 
+let pipolStackIndex = 0;
 function renderMembers() {
   byId("member-total").textContent = `${state.members.length} member account${state.members.length === 1 ? "" : "s"}`;
-  const addButton = document.querySelector("[data-open-member]"); if (addButton) addButton.hidden = true;
+  const addButton = document.querySelector("[data-open-member]"); if (addButton) addButton.hidden = !isAdmin();
+  pipolStackIndex = Math.min(pipolStackIndex, Math.max(0, state.members.length - 1));
   byId("members-list").innerHTML = state.members.map((member, index) => {
     const unpaid = memberUnpaidFunds(member.id), status = unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"}` : "All paid up", canManage = canManageMember(member);
     const avatar = canManage ? `<button class="avatar avatar-photo" type="button" data-select-member-photo="${member.id}" aria-label="Change ${escapeHtml(member.name)} profile photo">${accountAvatarContent(member)}<i>＋</i></button>` : `<span class="avatar">${accountAvatarContent(member)}</span>`;
     const actions = `<button class="view-payment-button" type="button" data-view-payment-profile="${member.id}">Payment profile</button>${canManage ? `<button class="edit-member-button" type="button" data-edit-member="${member.id}">Edit</button>` : ""}`;
-    return `<article class="member-id-card"><div class="member-id-band"><span>GROUP FUNDS</span><span>MEMBER ID ${String(index + 1).padStart(2, "0")}</span></div><div class="member-id-main">${avatar}<span class="member-id-copy"><small>${escapeHtml(member.label || "HOUSE MEMBER")}</small><b>${escapeHtml(member.nickname || member.name)}</b><span>${escapeHtml(member.contact || "No contact added")}</span></span></div><div class="member-id-footer"><span>${memberFundCount(member.id)} shared fund${memberFundCount(member.id) === 1 ? "" : "s"}</span><b class="${unpaid.length ? "owing" : ""}">${status}</b></div><div class="member-id-actions">${actions}</div></article>`;
+    const stackPosition = (index - pipolStackIndex + state.members.length) % state.members.length;
+    return `<article class="member-id-card pipol-card pipol-card-${Math.min(stackPosition, 3)}" data-theme="${escapeHtml(member.theme || "maya-black")}" data-rotate-pipol aria-label="Show next member card"><div class="member-id-band"><span>RM331</span><span>MEMBER ID ${String(index + 1).padStart(2, "0")}</span></div><div class="member-id-main">${avatar}<span class="member-id-copy"><small>${escapeHtml(member.label || "HOUSE MEMBER")}</small><b>${escapeHtml(member.nickname || member.name)}</b><span>${escapeHtml(member.contact || "No contact added")}</span></span></div><div class="member-id-footer"><span>${memberFundCount(member.id)} shared fund${memberFundCount(member.id) === 1 ? "" : "s"}</span><b class="${unpaid.length ? "owing" : ""}">${status}</b></div><div class="member-id-actions">${actions}</div></article>`;
   }).join("") || `<div class="empty-state"><b>No accounts available</b>This group is limited to its five member profiles.</div>`;
 }
+
+document.addEventListener("click", event => {
+  const card = event.target.closest("[data-rotate-pipol]");
+  if (!card || event.target.closest("button")) return;
+  pipolStackIndex = (pipolStackIndex + 1) % Math.max(1, state.members.length);
+  renderMembers();
+});
 
 function openProfilePicker() {
   byId("profile-picker-list").innerHTML = state.members.map(member => `<button class="profile-choice" type="button" data-select-profile="${member.id}"><span class="avatar">${accountAvatarContent(member)}</span><b>${escapeHtml(member.nickname || member.name)}</b><small>${escapeHtml(member.label || (memberUnpaidFunds(member.id).length ? `${memberUnpaidFunds(member.id).length} payment${memberUnpaidFunds(member.id).length === 1 ? "" : "s"} waiting` : "All caught up"))}</small></button>`).join("");
@@ -715,3 +771,27 @@ byId("share-fund").addEventListener("click", async () => {
     window.prompt("Copy this share link", link.toString());
   }
 });
+
+document.addEventListener("click", event => {
+  const ownership = event.target.closest("[data-fund-owner]");
+  if (!ownership) return;
+  activeOwnership = ownership.dataset.fundOwner;
+  renderFunds();
+});
+
+byId("generate-receipt").addEventListener("click", () => {
+  const fund = state.funds.find(item => item.id === activeFundId);
+  if (fund) generateReceipt(fund);
+});
+
+function renderSyncDateTime() {
+  const timestamp = byId("sync-date-time");
+  if (!timestamp) return;
+  const now = new Date();
+  const date = new Intl.DateTimeFormat("en-PH", { month:"short", day:"numeric", year:"numeric" }).format(now);
+  const time = new Intl.DateTimeFormat("en-PH", { hour:"numeric", minute:"2-digit" }).format(now);
+  timestamp.dateTime = now.toISOString();
+  timestamp.textContent = `${date} • ${time}`;
+}
+renderSyncDateTime();
+setInterval(renderSyncDateTime, 30000);
