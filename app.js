@@ -22,34 +22,28 @@ const postedAge = fund => { const date = new Date(postedAt(fund)); if (Number.is
 const posterName = fund => (state.members.find(member => member.id === (fund.createdById || "member-1")) || { name:"Chan" }).name;
 const sortFunds = (funds, sort = activeSort) => { const sorted = [...funds].sort((a,b) => { if (sort === "name") return a.title.localeCompare(b.title) || postedAt(b).localeCompare(postedAt(a)); if (sort === "member") return posterName(a).localeCompare(posterName(b)) || a.title.localeCompare(b.title); return postedAt(a).localeCompare(postedAt(b)); }); return activeSortDirection === "asc" ? sorted : sorted.reverse(); };
 function showToast(message) { const toast = byId("toast"); toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), 2800); }
-async function api(url, options = {}) { const response = await fetch(url, { ...options, headers:{ "Content-Type":"application/json", ...(options.headers || {}) } }), text = await response.text(), contentType = response.headers.get("content-type") || ""; if (!response.ok) { const body = contentType.includes("application/json") ? JSON.parse(text || "{}") : {}; throw new Error(body.error || "Could not save your changes."); } if (!contentType.includes("application/json")) { if (/continue with vercel|log in to vercel|vercel authentication/i.test(text)) throw new Error("This Vercel deployment is protected. Disable Vercel Authentication for the public app."); throw new Error("The shared-data service returned an unexpected response."); } try { return JSON.parse(text); } catch { throw new Error("The shared-data service returned invalid data."); } }
-async function loadState(silent = false) { try { const [nextState, health] = await Promise.all([api("/api/state"), api("/api/health")]); state = nextState; if (sharedFundId && state.funds.some(fund => fund.id === sharedFundId)) activeFundId = sharedFundId; const needsSharedStorage = /\.vercel\.app$/i.test(location.hostname) && health.storage !== "redis"; document.querySelector(".connection").classList.toggle("online", !needsSharedStorage); byId("connection-status").textContent = needsSharedStorage ? "Shared storage needs setup" : "Live sync on"; render(); if (needsSharedStorage && !silent) showToast("Shared storage is not connected. Complete the Vercel checklist before adding funds."); } catch (error) { document.querySelector(".connection").classList.remove("online"); byId("connection-status").textContent = "Shared data unavailable"; if (!silent) showToast(error.message || "Could not reach the shared expense data."); } }
-function legacy_render_1() { renderNavigation(); renderOverview(); renderFunds(); renderMembers(); if (activeFundId) renderDetail(); }
-function legacy_renderNavigation_1() { byId("open-nav-count").textContent = openFunds().length; document.querySelectorAll(".nav-link, .tab-link").forEach(link => link.classList.toggle("active", link.dataset.route === activeRoute)); }
-function legacy_fundsHtml_1(funds, emptyTitle, emptyCopy) { if (!funds.length) return `<div class="empty-state"><b>${emptyTitle}</b>${emptyCopy}<br><button class="primary-button" type="button" data-open-fund>＋ Add split fund</button></div>`; return funds.map(fund => { const count = paidCount(fund), people = fund.memberIds.length, done = settled(fund), percent = people ? count / people * 100 : 0; return `<button class="fund-row" data-fund-id="${fund.id}" type="button"><span class="fund-icon">${fund.icon || "◈"}</span><span class="fund-copy"><strong>${escapeHtml(fund.title)}</strong><small>${escapeHtml(fund.description || "No description")}</small></span><span class="fund-meta"><b>${dateLabel(fund.date)}</b>${people} member${people === 1 ? "" : "s"}</span><span class="payment-progress"><span class="progress-caption"><span>${count}/${people} paid</span><b>${Math.round(percent)}%</b></span><span class="progress"><i style="width:${percent}%"></i></span></span><span class="fund-amount">${money(fund.total)}</span><span class="status-pill ${done ? "settled" : ""}">${done ? "Settled" : "Open"}</span><span class="row-arrow">›</span></button>`; }).join(""); }
+const DEBUG_TIMING = localStorage.getItem("rm331-debug-timing") === "1";
+const pendingMutations = new Set();
+let stateLoadPromise = null, lastStateSyncAt = 0, healthChecked = false;
+const logTiming = (label, start) => { if (DEBUG_TIMING) console.debug(`[Group Funds Calculator] ${label}: ${(performance.now() - start).toFixed(0)}ms`); };
+async function withPending(key, control, pendingLabel, action) { if (pendingMutations.has(key)) return; pendingMutations.add(key); const previousContent = control?.innerHTML; if (control) { control.disabled = true; if (pendingLabel) control.textContent = pendingLabel; control.setAttribute("aria-busy", "true"); } try { return await action(); } finally { pendingMutations.delete(key); if (control) { control.disabled = false; if (pendingLabel !== "") control.innerHTML = previousContent; control.removeAttribute("aria-busy"); } } }
+async function api(url, options = {}) { const startedAt = performance.now(), isCreateFund = url === "/api/funds" && options.method === "POST"; if (isCreateFund) logTiming("T2 request sent", startedAt); const response = await fetch(url, { ...options, headers:{ "Content-Type":"application/json", ...(options.headers || {}) } }), text = await response.text(), contentType = response.headers.get("content-type") || ""; if (isCreateFund) logTiming(`T7 response received (${text.length} bytes)`, startedAt); if (!response.ok) { const body = contentType.includes("application/json") ? JSON.parse(text || "{}") : {}; throw new Error(body.error || "Could not save your changes."); } if (!contentType.includes("application/json")) { if (/continue with vercel|log in to vercel|vercel authentication/i.test(text)) throw new Error("This Vercel deployment is protected. Disable Vercel Authentication for the public app."); throw new Error("The shared-data service returned an unexpected response."); } try { return JSON.parse(text); } catch { throw new Error("The shared-data service returned invalid data."); } }
+async function refreshHealth(silent = false) { const health = await api("/api/health"), needsSharedStorage = /\.vercel\.app$/i.test(location.hostname) && health.storage !== "redis"; healthChecked = true; document.querySelector(".connection").classList.toggle("online", !needsSharedStorage); byId("connection-status").textContent = needsSharedStorage ? "Shared storage needs setup" : "Live sync on"; if (needsSharedStorage && !silent) showToast("Shared storage is not connected. Complete the Vercel checklist before adding funds."); }
+async function loadState(silent = false, checkHealth = !healthChecked) { if (stateLoadPromise) return stateLoadPromise; stateLoadPromise = (async () => { try { const nextState = await api("/api/state"); state = nextState; lastStateSyncAt = Date.now(); if (checkHealth) await refreshHealth(silent); if (sharedFundId && state.funds.some(fund => fund.id === sharedFundId)) activeFundId = sharedFundId; render(); } catch (error) { document.querySelector(".connection").classList.remove("online"); byId("connection-status").textContent = "Shared data unavailable"; healthChecked = false; if (!silent) showToast(error.message || "Could not reach the shared expense data."); } finally { stateLoadPromise = null; } })(); return stateLoadPromise; }
 function renderOverview() { const profile = currentProfile(), open = openFunds(), toPay = profile ? memberUnpaidFunds(profile.id) : [], collections = profile ? open.map(fund => ({ fund, amount:payableMemberIds(fund).filter(id => id !== profile.id && !fund.payments?.[id]).reduce((sum,id) => sum + memberShare(fund,id),0), waiting:payableMemberIds(fund).filter(id => id !== profile.id && !fund.payments?.[id]).length })).filter(item => item.amount > 0 && fundCreatorId(item.fund) === profile.id) : [], collectTotal = collections.reduce((sum,item) => sum + item.amount,0), awaiting = collections.reduce((sum,item) => sum + item.waiting, 0), done = profile ? state.funds.filter(fund => fundCreatorId(fund) === profile.id && settled(fund)).length : 0; byId("stat-grid").innerHTML = [["Open to collect from others",money(collectTotal),collections.length ? `${collections.length} active collection${collections.length === 1 ? "" : "s"}` : "No active collections",collections.length ? "open":"ok"],["To pay",toPay.length,toPay.length ? `${money(memberOwed(profile?.id))} across your open funds` : "You are all caught up",toPay.length ? "open":"ok"],["Payments waiting",awaiting,awaiting ? "Payments due to you" : "Nothing is waiting",awaiting ? "open":"ok"],["Settled",done,done ? "Your completed collections" : "No completed collections","ok"]].map(([label,value,caption,kind], index) => `<article class="stat-card ${index === 0 ? "collection-summary" : "summary-counter"}"><span>${label}</span><strong>${value}</strong><small class="${kind}">${caption}</small></article>`).join(""); byId("recent-funds").innerHTML = fundsHtml(sortFunds(state.funds).slice(0,4), "No split funds yet", "Add your first shared purchase to get started."); }
 function renderFunds() { const all = state.funds, open = all.filter(fund => !settled(fund)), closed = all.filter(settled), profileId = currentProfile()?.id; byId("all-count").textContent = all.length; byId("open-count").textContent = open.length; byId("settled-count").textContent = closed.length; byId("fund-sort").value = activeSort; byId("fund-sort-direction").textContent = activeSortDirection === "asc" ? "↑" : "↓"; byId("fund-sort-direction").setAttribute("aria-label", `Sort ${activeSortDirection === "asc" ? "ascending" : "descending"}`); const query = byId("fund-search").value.trim().toLowerCase(); let funds = activeFilter === "open" ? open : activeFilter === "settled" ? closed : all; if (activeOwnership === "yours") funds = funds.filter(fund => fundCreatorId(fund) === profileId); if (activeOwnership === "others") funds = funds.filter(fund => fundCreatorId(fund) !== profileId); if (query) funds = funds.filter(fund => `${fund.title} ${fund.description || ""} ${posterName(fund)}`.toLowerCase().includes(query)); byId("funds-list").innerHTML = fundsHtml(sortFunds(funds), query ? "No matching funds" : "No funds in this view", query ? "Try another word or clear the search." : "Create a split fund to start tracking the house expenses."); document.querySelectorAll(".filter").forEach(button => button.classList.toggle("active", button.dataset.filter === activeFilter)); document.querySelectorAll("[data-fund-owner]").forEach(button => button.classList.toggle("active", button.dataset.fundOwner === activeOwnership)); }
-function legacy_renderMembers_1() { byId("member-total").textContent = `${state.members.length} house member${state.members.length === 1 ? "" : "s"}`; byId("members-list").innerHTML = state.members.map(member => `<article class="member-card"><span class="avatar">${initials(member.name)}</span><span><b>${escapeHtml(member.name)}</b><small>${memberFundCount(member.id)} split fund${memberFundCount(member.id) === 1 ? "" : "s"}</small></span><button type="button" data-delete-member="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">×</button></article>`).join("") || `<div class="empty-state"><b>No members yet</b>Add your housemates before creating a fund.</div>`; }
 const memberFundCount = id => state.funds.filter(fund => fund.memberIds.includes(id)).length;
-function legacy_showRoute_1(route) { activeRoute = route; ["overview","funds","members"].forEach(name => byId(`${name}-view`).hidden = name !== route); if (window.location.hash.slice(1) !== route) window.location.hash = route; renderNavigation(); if(route === "funds") renderFunds(); }
 function updateFundPreview() { if (activeSplitMode === "itemized" && byId("itemized-editor")) { updateItemizedSummary(); return; } const selected = document.querySelectorAll(".member-choice input:checked").length, choices = document.querySelectorAll(".member-choice input").length, total = Number(byId("fund-total").value) || 0; byId("per-person-preview").innerHTML = `${money(total)} <small>bill total</small>`; byId("select-all-members").checked = choices > 0 && selected === choices; const note = byId("selection-note"); note.textContent = selected ? `${money(total)} ÷ ${selected} ${selected === 1 ? "person" : "people"} = ${money(total / selected)} each` : "Select at least one person to calculate the equal split."; note.classList.toggle("ready", Boolean(selected)); document.querySelectorAll(".member-choice").forEach(item => item.classList.toggle("selected", item.querySelector("input").checked)); }
 function refreshFundMemberChoices(includeMemberId) { const selected = new Set([...document.querySelectorAll(".member-choice input:checked")].map(input => input.value)); if (includeMemberId) selected.add(includeMemberId); const people = [...state.members, ...itemizedGuests]; byId("fund-member-select").innerHTML = people.map(person => `<label class="member-choice"><input type="checkbox" value="${escapeHtml(person.id)}" ${selected.has(person.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(person.nickname || person.name)}${person.guest ? " · temporary" : ""}</span></label>`).join(""); byId("all-members-caption").textContent = `${people.length} people`; updateFundPreview(); }
 function renderReceiptPreview() { const preview = byId("receipt-preview"); preview.hidden = !currentReceipt; if (currentReceipt) byId("receipt-image").src = currentReceipt; }
-function legacy_openFundModal_1(fund = null) { editingFundId = fund?.id || null; currentReceipt = fund?.receipt || null; calculatorExpression = ""; byId("calculator-display").textContent = "0"; byId("receipt-input").value = ""; renderReceiptPreview(); byId("fund-modal-eyebrow").textContent = fund ? "EDIT SPLIT FUND" : "NEW SPLIT FUND"; byId("fund-modal-title").textContent = fund ? "Edit split fund" : "Add a split fund"; byId("save-fund-button").textContent = fund ? "Save changes" : "Create split fund"; byId("fund-title").value = fund?.title || ""; byId("fund-description").value = fund?.description || ""; byId("fund-date").value = fund?.date || new Date().toISOString().slice(0,10); byId("fund-total").value = fund?.total || ""; byId("fund-member-select").innerHTML = state.members.map(member => `<label class="member-choice"><input type="checkbox" value="${member.id}" ${fund?.memberIds.includes(member.id) ? "checked" : ""}/><span class="custom-check"></span><span>${escapeHtml(member.name)}</span></label>`).join(""); byId("all-members-caption").textContent = `${state.members.length} people`; byId("fund-modal").hidden = false; updateFundPreview(); byId("fund-title").focus(); }
 function closeModals() { document.querySelectorAll(".modal-backdrop").forEach(modal => modal.hidden = true); activeFundId = null; }
-function legacy_openMemberModal_1() { byId("member-modal").hidden = false; byId("member-name").value = ""; byId("member-name").focus(); }
-function legacy_renderDetail_1() { const fund = state.funds.find(item => item.id === activeFundId); if (!fund) return closeModals(); const people = fundPeople(fund), count = paidCount(fund); byId("detail-date").textContent = `${dateLabel(fund.date)} · SPLIT FUND`; byId("detail-title").textContent = fund.title; byId("detail-description").textContent = fund.description || "No description added."; byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${people.length} paid`; byId("detail-receipt").hidden = !fund.receipt; if (fund.receipt) byId("detail-receipt-image").src = fund.receipt; byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]); return `<div class="payment-row"><span class="avatar">${initials(person.name)}</span><span><strong>${escapeHtml(person.name)}</strong><small>${money(share(fund))} share</small></span><button type="button" class="${paid ? "paid" : ""}" data-toggle-payment="${person.id}">${paid ? "✓ Paid" : "Mark paid"}</button></div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false; }
 function renderCalculator() { byId("calculator-display").textContent = calculatorExpression ? calculatorExpression.replace(/\*/g,"×").replace(/\//g,"÷") : "0"; }
-function legacy_useCalculatorKey_1(key) { if (key === "clear") calculatorExpression = ""; else if (key === "back") calculatorExpression = calculatorExpression.slice(0, -1); else if (key === "equals") { if (!calculatorExpression || !/^[0-9+\-*/.\s]+$/.test(calculatorExpression)) return showToast("Use valid numbers and calculator operators."); try { const result = Function(`"use strict"; return (${calculatorExpression})`)(); if (!Number.isFinite(result)) throw new Error(); const rounded = Math.round(result * 100) / 100; calculatorExpression = String(rounded); byId("fund-total").value = rounded; updateFundPreview(); } catch { return showToast("That calculation cannot be solved."); } } else { const operators = "+-*/"; const last = calculatorExpression.slice(-1); if (operators.includes(key) && (!calculatorExpression || operators.includes(last))) { if (key === "-" && !calculatorExpression) calculatorExpression = "-"; else if (calculatorExpression) calculatorExpression = calculatorExpression.slice(0,-1) + key; } else if (key === ".") { const currentNumber = calculatorExpression.split(/[+\-*/]/).pop(); if (!currentNumber.includes(".")) calculatorExpression += key; } else calculatorExpression += key; renderCalculator(); } }
 async function compressReceipt(file) { if (!file || !file.type.startsWith("image/")) throw new Error("Choose a PNG, JPEG, or WebP receipt image."); const source = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error("The receipt could not be read.")); reader.readAsDataURL(file); }); const image = await new Promise((resolve,reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = () => reject(new Error("The receipt image could not be opened.")); element.src = source; }); const scale = Math.min(1, 1000 / Math.max(image.width, image.height)); const canvas = document.createElement("canvas"); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale); canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height); let encoded = canvas.toDataURL("image/jpeg", .76); if (encoded.length > 850000) { canvas.width = Math.round(canvas.width * .78); canvas.height = Math.round(canvas.height * .78); canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height); encoded = canvas.toDataURL("image/jpeg", .62); } if (encoded.length > 900000) throw new Error("That receipt is still too large. Please use a smaller image."); return encoded; }
-document.addEventListener("click", async event => { const route = event.target.closest("[data-route]"); if (route) { event.preventDefault(); showRoute(route.dataset.route); return; } if (event.target.closest("[data-open-fund]") || event.target.closest("#mobile-add")) return openFundModal(); if (event.target.closest("[data-open-member]")) return openMemberModal(); if (event.target.closest("[data-close-modal]")) return closeModals(); const filter = event.target.closest(".filter"); if(filter) { activeFilter = filter.dataset.filter; renderFunds(); return; } const row = event.target.closest("[data-fund-id]"); if(row) { activeFundId = row.dataset.fundId; renderDetail(); return; } const pay = event.target.closest("[data-toggle-payment]"); if(pay) { const fund = state.funds.find(item => item.id === activeFundId); try { state = await api(`/api/funds/${fund.id}/payments`, { method:"PATCH", body:JSON.stringify({ memberId: pay.dataset.togglePayment, paid: !fund.payments?.[pay.dataset.togglePayment] }) }); render(); } catch(error) { showToast(error.message); } return; } const remove = event.target.closest("[data-delete-member]"); if(remove) { const member = state.members.find(item => item.id === remove.dataset.deleteMember); if (!confirm(`Remove ${member.name}? They will stay on past split funds as a former member.`)) return; try { state = await api(`/api/members/${member.id}`,{method:"DELETE"}); render(); showToast("Member removed."); } catch(error) { showToast(error.message); } } });
+document.addEventListener("click", event => { const route = event.target.closest("[data-route]"); if (route) { event.preventDefault(); showRoute(route.dataset.route); return; } if (event.target.closest("[data-open-fund]") || event.target.closest("#mobile-add")) return openFundModal(); if (event.target.closest("[data-open-member]")) return openMemberModal(); if (event.target.closest("[data-close-modal]")) return closeModals(); const filter = event.target.closest(".filter"); if(filter) { activeFilter = filter.dataset.filter; renderFunds(); return; } const row = event.target.closest("[data-fund-id]"); if(row) { activeFundId = row.dataset.fundId; renderDetail(); } });
 byId("fund-search").addEventListener("input", renderFunds); byId("fund-sort").addEventListener("change", event => { activeSort = event.target.value; renderFunds(); }); byId("fund-sort-direction").addEventListener("click", () => { activeSortDirection = activeSortDirection === "asc" ? "desc" : "asc"; renderFunds(); }); byId("fund-total").addEventListener("input", updateFundPreview); byId("fund-member-select").addEventListener("change", updateFundPreview); byId("select-all-members").addEventListener("change", event => { document.querySelectorAll(".member-choice input").forEach(input => input.checked = event.target.checked); updateFundPreview(); });
-byId("fund-form").addEventListener("submit", async event => { event.preventDefault(); const memberIds = [...document.querySelectorAll(".member-choice input:checked")].map(input => input.value); if (!memberIds.length) return showToast("Select at least one member."); const payload = { title:byId("fund-title").value.trim(), description:byId("fund-description").value.trim(), date:byId("fund-date").value, total:Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID }; try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); showToast(message); } catch(error) { showToast(error.message); } });
-byId("member-form").addEventListener("submit", async event => { event.preventDefault(); const name = byId("member-name").value.trim(); try { state = await api("/api/members", {method:"POST",body:JSON.stringify({name})}); const newMember = state.members.at(-1); byId("member-modal").hidden = true; render(); if (!byId("fund-modal").hidden) refreshFundMemberChoices(newMember?.id); showToast(`${name} was added.`); } catch(error) { showToast(error.message); } });
 byId("edit-fund").addEventListener("click", () => { const fund = state.funds.find(item => item.id === activeFundId); byId("detail-modal").hidden = true; openFundModal(fund); });
-byId("delete-fund").addEventListener("click", async () => { const fund = state.funds.find(item => item.id === activeFundId); if (!confirm(`Delete “${fund.title}”? This cannot be undone.`)) return; try { state = await api(`/api/funds/${fund.id}`, {method:"DELETE"}); closeModals(); render(); showToast("Split fund deleted."); } catch(error) { showToast(error.message); } });
+byId("delete-fund").addEventListener("click", async () => { const fund = state.funds.find(item => item.id === activeFundId); if (!fund || !confirm(`Delete “${fund.title}”? This cannot be undone.`)) return; await withPending(`fund-delete:${fund.id}`, byId("delete-fund"), "Deleting…", async () => { try { state = await api(`/api/funds/${fund.id}`, {method:"DELETE"}); closeModals(); render(); showToast("Split fund deleted."); } catch(error) { showToast(error.message); } }); });
 window.addEventListener("hashchange", () => { const rawRoute = location.hash.slice(1), route = rawRoute === "more" ? "profile" : rawRoute; if (rawRoute === "more") { location.hash = "profile"; return; } if (["overview","funds","members","profile"].includes(route) && route !== activeRoute) showRoute(route); });
-const initialRoute = location.hash.slice(1) === "more" ? "profile" : location.hash.slice(1); if (["overview","funds","members","profile"].includes(initialRoute)) activeRoute = initialRoute; showRoute(activeRoute); loadState(); setInterval(() => loadState(true), 60000);
 
 // A profile is a lightweight, device-local selection—not a password account.
 const PROFILE_STORAGE_KEY = "splitwise-house-profile-id";
@@ -59,40 +53,17 @@ const fundCreatorId = fund => fund.createdById || "member-1";
 const memberFunds = memberId => state.funds.filter(fund => fund.memberIds.includes(memberId));
 const memberUnpaidFunds = memberId => memberFunds(memberId).filter(fund => payableMemberIds(fund).includes(memberId) && !fund.payments?.[memberId]);
 const memberOwed = memberId => memberUnpaidFunds(memberId).reduce((total, fund) => total + memberShare(fund, memberId), 0);
+const fundDetailsLoads = new Map();
+async function ensureFundDetails(fund) { if (!fund?.hasReceipt || fund.receipt) return fund; if (!fundDetailsLoads.has(fund.id)) fundDetailsLoads.set(fund.id, api(`/api/funds/${fund.id}`).then(fullFund => { const index = state.funds.findIndex(item => item.id === fund.id); if (index >= 0) state.funds[index] = fullFund; return fullFund; }).finally(() => fundDetailsLoads.delete(fund.id))); return fundDetailsLoads.get(fund.id); }
 
 function renderNavigation() {
   byId("open-nav-count").textContent = openFunds().length;
   document.querySelectorAll(".nav-link, .tab-link").forEach(link => link.classList.toggle("active", link.dataset.route === activeRoute));
 }
 
-function legacy_renderProfileChrome_1() {
-  const profile = currentProfile();
-  byId("profile-avatar").textContent = profile ? initials(profile.name) : "?";
-  byId("profile-switcher-name").textContent = profile ? profile.name : "Choose a member";
-  byId("overview-greeting").textContent = profile ? `Good morning, ${profile.name}` : "Welcome to RM331";
-}
-
 function profileFundHtml(fund) {
   const amount = memberShare(fund, currentProfile()?.id);
   return `<article class="personal-fund"><span class="personal-fund-icon">${fund.icon || "◈"}</span><span><b>${escapeHtml(fund.title)}</b><small>${dateLabel(fund.date)} · ${money(amount)} your share</small></span><strong>${money(amount)}</strong></article>`;
-}
-
-function legacy_renderMore_1() {
-  const profile = currentProfile();
-  const unpaid = profile ? memberUnpaidFunds(profile.id) : [];
-  const owed = profile ? memberOwed(profile.id) : 0;
-  byId("tracker-title").textContent = profile ? `${profile.name}'s tracker` : "My payments";
-  byId("tracker-subheading").textContent = profile ? "Your share of every shared expense, in one place." : "Choose a member profile to see a personal tracker.";
-  byId("profile-summary").innerHTML = profile
-    ? `<span class="avatar">${initials(profile.name)}</span><span><b>${escapeHtml(profile.name)}</b><small>${unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"} · ${money(owed)} to pay` : "You are all caught up"}</small></span><button type="button" data-open-profile>Switch</button>`
-    : `<span class="avatar">?</span><span><b>No member selected</b><small>Select who is using this device to see their tracker.</small></span><button type="button" data-open-profile>Choose</button>`;
-  byId("unpaid-count").textContent = unpaid.length;
-  byId("personal-unpaid-list").innerHTML = unpaid.length ? unpaid.map(profileFundHtml).join("") : `<div class="empty-state"><b>${profile ? "All caught up" : "Choose a member"}</b>${profile ? "There are no unpaid split funds for this profile." : "Select a profile to see personal payment reminders."}</div>`;
-  byId("member-status-list").innerHTML = state.members.map(member => {
-    const awaiting = memberUnpaidFunds(member.id), owedAmount = memberOwed(member.id);
-    const label = awaiting.length ? `${awaiting.length} unpaid · ${money(owedAmount)} to pay` : "All paid up";
-    return `<article class="member-status-card"><span class="avatar">${initials(member.name)}</span><span><b>${escapeHtml(member.name)}${profile?.id === member.id ? " (you)" : ""}</b><small class="${awaiting.length ? "owing" : ""}">${label}</small></span></article>`;
-  }).join("") || `<div class="empty-state"><b>No members yet</b>Add housemates to start tracking payments.</div>`;
 }
 
 function render() {
@@ -123,11 +94,6 @@ function showRoute(route) {
   if (route === "profile") renderProfile();
 }
 
-function legacy_openProfilePicker_1() {
-  byId("profile-picker-list").innerHTML = state.members.map(member => `<button class="profile-choice" type="button" data-select-profile="${member.id}"><span class="avatar">${initials(member.name)}</span><b>${escapeHtml(member.name)}</b><small>${memberUnpaidFunds(member.id).length ? `${memberUnpaidFunds(member.id).length} payment${memberUnpaidFunds(member.id).length === 1 ? "" : "s"} waiting` : "All caught up"}</small></button>`).join("");
-  byId("profile-modal").hidden = false;
-}
-
 document.addEventListener("click", event => {
   const profileButton = event.target.closest("[data-select-profile]");
   if (profileButton) {
@@ -142,32 +108,6 @@ document.addEventListener("click", event => {
   }
   if (event.target.closest("[data-open-profile]")) openProfilePicker();
 });
-
-function legacy_useCalculatorKey_2(key) {
-  const operators = "+-*/";
-  if (key === "clear") calculatorExpression = "";
-  else if (key === "back") calculatorExpression = calculatorExpression.slice(0, -1);
-  else if (key === "equals") {
-    if (!calculatorExpression || !/^[0-9+\-*/.\s]+$/.test(calculatorExpression)) return showToast("Use valid numbers and calculator operators.");
-    try {
-      const result = Function(`"use strict"; return (${calculatorExpression})`)();
-      if (!Number.isFinite(result)) throw new Error();
-      const rounded = Math.round(result * 100) / 100;
-      calculatorExpression = String(rounded);
-      byId("fund-total").value = rounded;
-      updateFundPreview();
-    } catch { return showToast("That calculation cannot be solved."); }
-  } else {
-    const last = calculatorExpression.slice(-1);
-    if (operators.includes(key) && (!calculatorExpression || operators.includes(last))) {
-      calculatorExpression = key === "-" && !calculatorExpression ? "-" : calculatorExpression ? calculatorExpression.slice(0, -1) + key : "";
-    } else if (key === ".") {
-      const currentNumber = calculatorExpression.split(/[+\-*/]/).pop();
-      if (!currentNumber.includes(".")) calculatorExpression += key;
-    } else calculatorExpression += key;
-  }
-  renderCalculator();
-}
 
 document.addEventListener("click", async event => {
   const key = event.target.closest("[data-calc]");
@@ -266,9 +206,10 @@ function openSplitChoice() {
   ensureSplitChoiceModal();
   byId("split-choice-modal").hidden = false;
 }
-function openFundModal(fund = null, requestedMode = null) {
+async function openFundModal(fund = null, requestedMode = null) {
   if (state.members.length && (!currentProfile() || forceSharedProfile || forceProfileSelection)) return openProfilePicker();
   if (!fund && !requestedMode) return openSplitChoice();
+  if (fund) fund = await ensureFundDetails(fund);
   installDescriptionEditor();
   ensureItemizedEditor();
   editingFundId = fund?.id || null; currentReceipt = fund?.receipt || null; calculatorExpression = "";
@@ -329,13 +270,17 @@ document.addEventListener("input", event => { if (event.target.matches("[data-it
 document.addEventListener("change", event => { if (event.target.matches("[data-item-member]")) updateFundPreview(); });
 
 byId("fund-form").addEventListener("submit", async event => {
-  event.preventDefault(); event.stopImmediatePropagation();
+  event.preventDefault();
+  const startedAt = performance.now();
+  if (DEBUG_TIMING) console.debug("[Group Funds Calculator] T0 create/save pressed");
   const isItemized = activeSplitMode === "itemized", items = isItemized ? readItemizedRows() : [], memberIds = isItemized ? [...new Set(items.flatMap(item => item.memberIds))] : [...document.querySelectorAll(".member-choice input:checked")].map(input => input.value);
   if (!memberIds.length) return showToast(isItemized ? "Choose who shares at least one item." : "Select at least one member.");
   if (isItemized && items.some(item => !item.name || !Number.isFinite(item.amount) || item.amount <= 0 || !item.memberIds.length)) return showToast("Complete each item with a name, price, and people sharing it.");
   const payload = { title:byId("fund-title").value.trim(), description:sanitizeDescriptionHtml(byId("fund-description").innerHTML), date:byId("fund-date").value, total:isItemized ? items.reduce((sum, item) => sum + item.amount, 0) : Number(byId("fund-total").value), memberIds, receipt:currentReceipt, createdById:currentProfile()?.id || ADMIN_MEMBER_ID, splitMode:activeSplitMode, payerId:isItemized ? byId("itemized-payer").value : null, items, guests:itemizedGuests.map(({ id, name }) => ({ id, name })) };
-  try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); showToast(message); } catch(error) { showToast(error.message); }
-}, true);
+  logTiming("T1 payload prepared", startedAt);
+  const saveButton = byId("save-fund-button"), pendingKey = editingFundId ? `fund:${editingFundId}` : "fund:create";
+  await withPending(pendingKey, saveButton, editingFundId ? "Saving…" : "Creating…", async () => { try { state = editingFundId ? await api(`/api/funds/${editingFundId}`, {method:"PATCH",body:JSON.stringify(payload)}) : await api("/api/funds", {method:"POST",body:JSON.stringify(payload)}); const message = editingFundId ? "Split fund updated." : "Split fund added for the group."; closeModals(); render(); logTiming("T8 render completed", startedAt); showToast(message); } catch(error) { showToast(error.message); } });
+});
 
 function generateReceipt(fund) {
   const creator = fundPerson(fund, fundCreatorId(fund)), receiver = fund.splitMode === "itemized" ? fundPerson(fund, fund.payerId) : creator, qr = paymentMethods(receiver)[0];
@@ -355,7 +300,7 @@ function renderDetail() {
   const people = fundPeople(fund), payablePeople = people.filter(person => payableMemberIds(fund).includes(person.id)), count = paidCount(fund), payer = state.members.find(member => member.id === fund.payerId), receivingProfile = fund.splitMode === "itemized" ? (payer || fundPerson(fund, fund.payerId)) : fundPerson(fund, fundCreatorId(fund)); byId("detail-date").textContent = `${dateLabel(fund.date)} · ${fund.splitMode === "itemized" ? "ITEMIZED ORDER" : "SPLIT FUND"}`; byId("detail-title").textContent = fund.title;
   byId("detail-description").innerHTML = sanitizeDescriptionHtml(fund.description) || "No description added.";
   byId("detail-total").textContent = money(fund.total); byId("detail-share").textContent = fund.splitMode === "itemized" ? `Itemized · paid by ${payer?.nickname || payer?.name || "a member"}` : `${money(share(fund))} each`; byId("detail-payment-status").textContent = settled(fund) ? "All paid" : `${count} of ${payablePeople.length} paid`;
-  byId("detail-receipt").hidden = !fund.receipt; if (fund.receipt) byId("detail-receipt-image").src = fund.receipt;
+  byId("detail-receipt").hidden = !(fund.receipt || fund.hasReceipt); if (fund.receipt) byId("detail-receipt-image").src = fund.receipt; else byId("detail-receipt-image").removeAttribute("src");
   byId("payment-list").innerHTML = people.map(person => { const paid = Boolean(fund.payments?.[person.id]), amount = memberShare(fund, person.id), covered = fund.splitMode === "itemized" && person.id === fund.payerId, assignedItems = fund.splitMode === "itemized" ? (fund.items || []).filter(item => (item.memberIds || []).includes(person.id)) : [], itemMarkup = assignedItems.length ? `<small class="payment-order-lines"><b>Order:</b> ${assignedItems.map(item => `${escapeHtml(item.name)} · ${money(Number(item.amount) / Math.max(1, item.memberIds?.length || 1))}`).join(" &nbsp;·&nbsp; ")}</small>` : "", recipient = receivingProfile.nickname || receivingProfile.name, amountLine = covered ? `${money(amount)} covered by ${escapeHtml(recipient)}` : `${money(amount)} to pay to ${escapeHtml(recipient)}`, status = covered ? `<span class="payment-status covered">Covered as payer</span>` : `<button type="button" class="${paid ? "paid" : "unpaid"}" data-toggle-payment="${person.id}">${paid ? "Paid" : "Mark as paid"}</button>`; return `<div class="payment-row ${assignedItems.length ? "has-assigned-items" : ""} ${covered || paid ? "is-paid" : "is-unpaid"}"><span class="avatar">${initials(person.name)}</span><span class="payment-copy"><strong>${escapeHtml(person.name)}</strong><small>${amountLine}</small>${itemMarkup}</span>${status}</div>`; }).join(""); byId("payment-audit-list").innerHTML = paymentAuditMarkup(fund); byId("detail-modal").hidden = false;
 }
 
@@ -423,28 +368,7 @@ document.querySelector("#profile-modal .profile-picker-mark").remove();
 document.querySelector("#profile-modal .eyebrow").textContent = "GROUP FUNDS CALCULATOR";
 document.querySelector("#member-modal h2").textContent = "Add someone to RM331";
 
-const MEMBER_PHOTO_STORAGE_KEY = "rm331-member-photos";
-let memberPhotos = (() => { try { return JSON.parse(localStorage.getItem(MEMBER_PHOTO_STORAGE_KEY) || "{}"); } catch { return {}; } })();
 let photoMemberId = "";
-const memberPhoto = member => memberPhotos[member.id] || "";
-const memberAvatarContent = member => memberPhoto(member) ? `<img src="${escapeHtml(memberPhoto(member))}" alt="" />` : initials(member.name);
-
-function legacy_renderProfileChrome_2() {
-  const profile = currentProfile();
-  byId("profile-avatar").innerHTML = profile ? memberAvatarContent(profile) : "?";
-  byId("profile-switcher-name").textContent = profile ? profile.name : "Choose a member";
-  byId("overview-greeting").textContent = profile ? `Good morning, ${profile.name}` : "Welcome to RM331";
-}
-
-function legacy_renderMembers_2() {
-  byId("member-total").textContent = `${state.members.length} house member${state.members.length === 1 ? "" : "s"}`;
-  byId("members-list").innerHTML = state.members.map(member => `<article class="member-card"><span class="avatar">${memberAvatarContent(member)}</span><span><b>${escapeHtml(member.name)}</b><small>${memberFundCount(member.id)} split fund${memberFundCount(member.id) === 1 ? "" : "s"}</small></span><span class="member-card-actions"><button class="photo-button" type="button" data-select-member-photo="${member.id}">Photo</button><button type="button" data-delete-member="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">×</button></span></article>`).join("") || `<div class="empty-state"><b>No members yet</b>Add your housemates before creating a fund.</div>`;
-}
-
-function legacy_openProfilePicker_2() {
-  byId("profile-picker-list").innerHTML = state.members.map(member => `<button class="profile-choice" type="button" data-select-profile="${member.id}"><span class="avatar">${memberAvatarContent(member)}</span><b>${escapeHtml(member.name)}</b><small>${memberUnpaidFunds(member.id).length ? `${memberUnpaidFunds(member.id).length} payment${memberUnpaidFunds(member.id).length === 1 ? "" : "s"} waiting` : "All caught up"}</small></button>`).join("");
-  byId("profile-modal").hidden = false;
-}
 
 async function compressMemberPhoto(file, size = 120, kind = "profile") {
   if (!file) throw new Error("Choose an image to upload.");
@@ -466,21 +390,6 @@ document.addEventListener("click", event => {
   byId("member-photo-input").click();
 });
 
-byId("member-photo-input").addEventListener("change", async event => {
-  try {
-    const photo = await compressMemberPhoto(event.target.files?.[0]);
-    if (!photoMemberId) return;
-    memberPhotos[photoMemberId] = photo;
-    localStorage.setItem(MEMBER_PHOTO_STORAGE_KEY, JSON.stringify(memberPhotos));
-    event.target.value = "";
-    photoMemberId = "";
-    render();
-    showToast("Profile photo updated.");
-  } catch (error) {
-    event.target.value = "";
-    showToast(error.message);
-  }
-});
 
 let editingMemberId = null, memberCreationRequiresPayment = false;
 const ADMIN_MEMBER_ID = "member-1";
@@ -515,14 +424,6 @@ function openMemberModal(member = null) {
   byId("member-name").focus();
 }
 
-function legacy_renderMembers_3() {
-  byId("member-total").textContent = `${state.members.length} house member${state.members.length === 1 ? "" : "s"}`;
-  byId("members-list").innerHTML = state.members.map((member, index) => {
-    const unpaid = memberUnpaidFunds(member.id), status = unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"}` : "All paid up";
-    return `<article class="member-id-card"><div class="member-id-band"><span>RM331</span><span>MEMBER ID ${String(index + 1).padStart(2, "0")}</span></div><div class="member-id-main"><span class="avatar">${memberAvatarContent(member)}</span><span class="member-id-copy"><small>HOUSE MEMBER</small><b>${escapeHtml(member.name)}</b><span>${escapeHtml(member.contact || "No contact added")}</span></span></div><div class="member-id-footer"><span>${memberFundCount(member.id)} shared fund${memberFundCount(member.id) === 1 ? "" : "s"}</span><b class="${unpaid.length ? "owing" : ""}">${status}</b></div><div class="member-id-actions"><button class="photo-button" type="button" data-select-member-photo="${member.id}">Photo</button><button class="edit-member-button" type="button" data-edit-member="${member.id}">Edit</button><button class="remove-member-button" type="button" data-delete-member="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">Remove</button></div></article>`;
-  }).join("") || `<div class="empty-state"><b>No members yet</b>Add your housemates before creating a fund.</div>`;
-}
-
 document.addEventListener("click", event => {
   const editButton = event.target.closest("[data-edit-member]");
   if (!editButton) return;
@@ -546,11 +447,11 @@ document.addEventListener("click", event => {
 
 byId("member-form").addEventListener("submit", async event => {
   event.preventDefault();
-  event.stopImmediatePropagation();
   const name = byId("member-name").value.trim(), nickname = byId("member-nickname").value.trim(), label = byId("member-label").value.trim(), contact = byId("member-contact").value.trim(), theme = byId("member-theme").value;
   const existing = editingMemberId ? state.members.find(member => member.id === editingMemberId) : null;
   if (existing && !canManageMember(existing)) return showToast("You can only manage your own account.");
-  try {
+  const submitButton = byId("member-form").querySelector("button[type=submit]"), pendingKey = editingMemberId ? `member:${editingMemberId}` : "member:create";
+  await withPending(pendingKey, submitButton, editingMemberId ? "Saving…" : "Adding…", async () => { try {
     let paymentMethods = existing?.paymentMethods || [];
     if (!editingMemberId) {
       const paymentLabel = byId("new-member-payment-label").value.trim(), paymentFile = byId("new-member-payment-image").files?.[0];
@@ -567,8 +468,8 @@ byId("member-form").addEventListener("submit", async event => {
     render();
     if (!byId("fund-modal").hidden) refreshFundMemberChoices(newMember?.id);
     showToast(newMember ? `${name} was added.` : "Member details updated.");
-  } catch (error) { showToast(error.message); }
-}, true);
+  } catch (error) { showToast(error.message); } });
+});
 
 function paymentMethods(member) { return Array.isArray(member.paymentMethods) ? member.paymentMethods : []; }
 function paymentMethodHtml(method, editable) { return `<article class="payment-method-card"><button type="button" class="qr-thumbnail" data-open-qr="${escapeHtml(method.id)}" aria-label="Open ${escapeHtml(method.label)} QR code"><img src="${escapeHtml(method.image)}" alt="${escapeHtml(method.label)} QR code" loading="lazy" decoding="async" /></button><span><b>${escapeHtml(method.label)}</b><small>Scan to pay</small></span>${editable ? `<span class="payment-method-actions"><button type="button" data-replace-payment-method="${escapeHtml(method.id)}">Replace</button><button type="button" data-remove-payment-method="${escapeHtml(method.id)}">Remove</button></span>` : ""}</article>`; }
@@ -581,14 +482,15 @@ function ensurePaymentDialog() {
     event.preventDefault();
     const member = state.members.find(item => item.id === byId("payment-profile-modal").dataset.memberId);
     if (!member || !canManageMember(member)) return showToast("You can only update your own payment profile.");
-    try {
+    const saveButton = byId("save-payment-method");
+    await withPending(`payment-method:${member.id}`, saveButton, "Saving…", async () => { try {
       const isReplacement = Boolean(editingPaymentMethodId);
       if (!isReplacement && paymentMethods(member).length >= 3) return showToast("Each profile can keep up to 3 QR codes.");
       const image = await compressMemberPhoto(byId("payment-method-image").files?.[0], 720, "qr"), label = byId("payment-method-label").value.trim();
       const methods = isReplacement ? paymentMethods(member).map(method => method.id === editingPaymentMethodId ? { ...method, label, image } : method) : [...paymentMethods(member), { id:crypto.randomUUID(), label, image }];
       state = await api(`/api/members/${member.id}`, { method:"PATCH", body:JSON.stringify({ ...accountPayload(member), paymentMethods:methods }) });
       render(); openPaymentProfile(state.members.find(item => item.id === member.id)); showToast(isReplacement ? "QR code replaced." : "QR code added.");
-    } catch (error) { showToast(error.message); }
+    } catch (error) { showToast(error.message); } });
   });
 }
 
@@ -629,7 +531,7 @@ document.addEventListener("click", async event => {
     const member = state.members.find(item => item.id === byId("payment-profile-modal").dataset.memberId);
     if (!member || !canManageMember(member)) return showToast("You can only update your own payment profile.");
     if (!window.confirm("Remove this QR code? This cannot be undone.")) return;
-    try { state = await api(`/api/members/${member.id}`, { method:"PATCH", body:JSON.stringify({ ...accountPayload(member), paymentMethods:paymentMethods(member).filter(method => method.id !== removeButton.dataset.removePaymentMethod) }) }); render(); openPaymentProfile(state.members.find(item => item.id === member.id)); } catch (error) { showToast(error.message); }
+    await withPending(`payment-method-remove:${member.id}:${removeButton.dataset.removePaymentMethod}`, removeButton, "Removing…", async () => { try { state = await api(`/api/members/${member.id}`, { method:"PATCH", body:JSON.stringify({ ...accountPayload(member), paymentMethods:paymentMethods(member).filter(method => method.id !== removeButton.dataset.removePaymentMethod) }) }); render(); openPaymentProfile(state.members.find(item => item.id === member.id)); } catch (error) { showToast(error.message); } });
   }
 });
 
@@ -644,7 +546,7 @@ function fundsHtml(funds, emptyTitle, emptyCopy) {
   }).join("");
 }
 
-const accountAvatarContent = member => member.avatar ? `<img src="${escapeHtml(member.avatar)}" alt="" loading="lazy" decoding="async" />` : memberAvatarContent(member);
+const accountAvatarContent = member => member.avatar ? `<img src="${escapeHtml(member.avatar)}" alt="" loading="lazy" decoding="async" />` : initials(member.name);
 const accountPayload = member => ({ name:member.name, nickname:member.nickname || "", label:member.label || "", contact:member.contact || "", theme:member.theme || "maya-black", avatar:member.avatar || "", paymentMethods:member.paymentMethods || [] });
 
 function renderProfileChrome() {
@@ -687,20 +589,19 @@ document.addEventListener("click", event => {
 
 document.addEventListener("click", event => {
   const removeButton = event.target.closest("[data-delete-member]");
-  if (removeButton) { event.preventDefault(); event.stopImmediatePropagation(); showToast("The five member profiles are fixed."); }
-}, true);
+  if (removeButton) { event.preventDefault(); showToast("The five member profiles are fixed."); }
+});
 
 byId("member-photo-input").addEventListener("change", async event => {
   if (!photoMemberId) return;
-  event.stopImmediatePropagation();
   const member = state.members.find(item => item.id === photoMemberId);
   if (!member || !canManageMember(member)) { event.target.value = ""; return showToast("You can only change your own profile photo."); }
-  try {
+  await withPending(`member-photo:${member.id}`, event.target, "", async () => { try {
     const avatar = await compressMemberPhoto(event.target.files?.[0]);
     state = await api(`/api/members/${member.id}`, { method:"PATCH", body:JSON.stringify({ ...accountPayload(member), avatar }) });
     event.target.value = ""; photoMemberId = ""; render(); showToast("Profile photo updated.");
-  } catch (error) { event.target.value = ""; showToast(error.message); }
-}, true);
+  } catch (error) { event.target.value = ""; showToast(error.message); } });
+});
 function paymentRecord(fund, memberId) {
   const record = fund.payments?.[memberId];
   return record && record !== true ? record : null;
@@ -728,13 +629,14 @@ function ensurePaymentConfirmationDialog() {
     if (!pendingPayment) return;
     const method = document.querySelector('input[name="payment-method"]:checked')?.value;
     if (!method) return showToast("Choose cash or online.");
-    try {
+    const confirmButton = byId("payment-confirm-form").querySelector("button[type=submit]"), paymentKey = `payment:${pendingPayment.fundId}:${pendingPayment.memberId}`;
+    await withPending(paymentKey, confirmButton, "Confirming…", async () => { try {
       state = await api(`/api/funds/${pendingPayment.fundId}/payments`, { method:"PATCH", body:JSON.stringify({ memberId:pendingPayment.memberId, paid:true, method, note:byId("payment-confirm-note").value.trim(), confirmedById:currentProfile()?.id || ADMIN_MEMBER_ID }) });
       byId("payment-confirm-modal").hidden = true;
       pendingPayment = null;
       render();
       showToast("Payment recorded in the audit trail.");
-    } catch (error) { showToast(error.message); }
+    } catch (error) { showToast(error.message); } });
   });
 }
 
@@ -753,18 +655,17 @@ document.addEventListener("click", async event => {
   const paymentButton = event.target.closest("[data-toggle-payment]");
   if (!paymentButton) return;
   event.preventDefault();
-  event.stopImmediatePropagation();
   const fund = state.funds.find(item => item.id === activeFundId);
   if (!fund) return;
   const memberId = paymentButton.dataset.togglePayment;
   if (!fund.payments?.[memberId]) return openPaymentConfirmation(fund, memberId);
   if (!window.confirm("Reopen this payment? The change will remain in the payment history.")) return;
-  try {
+  await withPending(`payment:${fund.id}:${memberId}`, paymentButton, "Reopening…", async () => { try {
     state = await api(`/api/funds/${fund.id}/payments`, { method:"PATCH", body:JSON.stringify({ memberId, paid:false, confirmedById:currentProfile()?.id || ADMIN_MEMBER_ID }) });
     render();
     showToast("Payment reopened and logged.");
-  } catch (error) { showToast(error.message); }
-}, true);
+  } catch (error) { showToast(error.message); } });
+});
 
 byId("share-fund").addEventListener("click", async () => {
   const fund = state.funds.find(item => item.id === activeFundId);
@@ -792,6 +693,15 @@ byId("generate-receipt").addEventListener("click", () => {
   if (fund) generateReceipt(fund);
 });
 
+byId("detail-receipt").addEventListener("click", async () => {
+  const fund = state.funds.find(item => item.id === activeFundId);
+  if (!fund) return;
+  if (fund.receipt) return window.open(fund.receipt, "_blank", "noopener,noreferrer");
+  const fullFund = await withPending(`receipt:${fund.id}`, byId("detail-receipt"), "Loading receipt…", () => ensureFundDetails(fund));
+  if (fullFund?.receipt) { renderDetail(); showToast("Receipt loaded. Tap it again to view."); }
+  else showToast("The receipt could not be loaded.");
+});
+
 function renderSyncDateTime() {
   const timestamp = byId("sync-date-time");
   if (!timestamp) return;
@@ -803,3 +713,4 @@ function renderSyncDateTime() {
 }
 renderSyncDateTime();
 setInterval(renderSyncDateTime, 30000);
+const initialRoute = location.hash.slice(1) === "more" ? "profile" : location.hash.slice(1); if (["overview","funds","members","profile"].includes(initialRoute)) activeRoute = initialRoute; showRoute(activeRoute); loadState(); setInterval(() => loadState(true, false), 300000); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Date.now() - lastStateSyncAt > 180000) loadState(true, false); });
