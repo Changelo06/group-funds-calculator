@@ -27,7 +27,7 @@ async function loadState(silent = false) { try { const [nextState, health] = awa
 function legacy_render_1() { renderNavigation(); renderOverview(); renderFunds(); renderMembers(); if (activeFundId) renderDetail(); }
 function legacy_renderNavigation_1() { byId("open-nav-count").textContent = openFunds().length; document.querySelectorAll(".nav-link, .tab-link").forEach(link => link.classList.toggle("active", link.dataset.route === activeRoute)); }
 function legacy_fundsHtml_1(funds, emptyTitle, emptyCopy) { if (!funds.length) return `<div class="empty-state"><b>${emptyTitle}</b>${emptyCopy}<br><button class="primary-button" type="button" data-open-fund>＋ Add split fund</button></div>`; return funds.map(fund => { const count = paidCount(fund), people = fund.memberIds.length, done = settled(fund), percent = people ? count / people * 100 : 0; return `<button class="fund-row" data-fund-id="${fund.id}" type="button"><span class="fund-icon">${fund.icon || "◈"}</span><span class="fund-copy"><strong>${escapeHtml(fund.title)}</strong><small>${escapeHtml(fund.description || "No description")}</small></span><span class="fund-meta"><b>${dateLabel(fund.date)}</b>${people} member${people === 1 ? "" : "s"}</span><span class="payment-progress"><span class="progress-caption"><span>${count}/${people} paid</span><b>${Math.round(percent)}%</b></span><span class="progress"><i style="width:${percent}%"></i></span></span><span class="fund-amount">${money(fund.total)}</span><span class="status-pill ${done ? "settled" : ""}">${done ? "Settled" : "Open"}</span><span class="row-arrow">›</span></button>`; }).join(""); }
-function renderOverview() { const profile = currentProfile(), open = openFunds(), toPay = profile ? memberUnpaidFunds(profile.id) : [], collections = profile ? open.map(fund => ({ fund, amount:payableMemberIds(fund).filter(id => id !== profile.id && !fund.payments?.[id]).reduce((sum,id) => sum + memberShare(fund,id),0), waiting:payableMemberIds(fund).filter(id => id !== profile.id && !fund.payments?.[id]).length })).filter(item => item.amount > 0 && fundCreatorId(item.fund) === profile.id) : [], collectTotal = collections.reduce((sum,item) => sum + item.amount,0), awaiting = collections.reduce((sum,item) => sum + item.waiting, 0), done = profile ? state.funds.filter(fund => fundCreatorId(fund) === profile.id && settled(fund)).length : 0; byId("stat-grid").innerHTML = [["Open to collect",money(collectTotal),collections.length ? `${collections.length} active collection${collections.length === 1 ? "" : "s"}` : "No active collections",collections.length ? "open":"ok"],["To pay",toPay.length,toPay.length ? `${money(memberOwed(profile?.id))} across your open funds` : "You are all caught up",toPay.length ? "open":"ok"],["Payments waiting",awaiting,awaiting ? "Payments due to you" : "Nothing is waiting",awaiting ? "open":"ok"],["Settled",done,done ? "Your completed collections" : "No completed collections","ok"]].map(([label,value,caption,kind]) => `<article class="stat-card"><span>${label}</span><strong>${value}</strong><small class="${kind}">${caption}</small></article>`).join(""); byId("recent-funds").innerHTML = fundsHtml(sortFunds(state.funds).slice(0,4), "No split funds yet", "Add your first shared purchase to get started."); }
+function renderOverview() { const profile = currentProfile(), open = openFunds(), toPay = profile ? memberUnpaidFunds(profile.id) : [], collections = profile ? open.map(fund => ({ fund, amount:payableMemberIds(fund).filter(id => id !== profile.id && !fund.payments?.[id]).reduce((sum,id) => sum + memberShare(fund,id),0), waiting:payableMemberIds(fund).filter(id => id !== profile.id && !fund.payments?.[id]).length })).filter(item => item.amount > 0 && fundCreatorId(item.fund) === profile.id) : [], collectTotal = collections.reduce((sum,item) => sum + item.amount,0), awaiting = collections.reduce((sum,item) => sum + item.waiting, 0), done = profile ? state.funds.filter(fund => fundCreatorId(fund) === profile.id && settled(fund)).length : 0; byId("stat-grid").innerHTML = [["Open to collect from others",money(collectTotal),collections.length ? `${collections.length} active collection${collections.length === 1 ? "" : "s"}` : "No active collections",collections.length ? "open":"ok"],["To pay",toPay.length,toPay.length ? `${money(memberOwed(profile?.id))} across your open funds` : "You are all caught up",toPay.length ? "open":"ok"],["Payments waiting",awaiting,awaiting ? "Payments due to you" : "Nothing is waiting",awaiting ? "open":"ok"],["Settled",done,done ? "Your completed collections" : "No completed collections","ok"]].map(([label,value,caption,kind], index) => `<article class="stat-card ${index === 0 ? "collection-summary" : "summary-counter"}"><span>${label}</span><strong>${value}</strong><small class="${kind}">${caption}</small></article>`).join(""); byId("recent-funds").innerHTML = fundsHtml(sortFunds(state.funds).slice(0,4), "No split funds yet", "Add your first shared purchase to get started."); }
 function renderFunds() { const all = state.funds, open = all.filter(fund => !settled(fund)), closed = all.filter(settled), profileId = currentProfile()?.id; byId("all-count").textContent = all.length; byId("open-count").textContent = open.length; byId("settled-count").textContent = closed.length; byId("fund-sort").value = activeSort; byId("fund-sort-direction").textContent = activeSortDirection === "asc" ? "↑" : "↓"; byId("fund-sort-direction").setAttribute("aria-label", `Sort ${activeSortDirection === "asc" ? "ascending" : "descending"}`); const query = byId("fund-search").value.trim().toLowerCase(); let funds = activeFilter === "open" ? open : activeFilter === "settled" ? closed : all; if (activeOwnership === "yours") funds = funds.filter(fund => fundCreatorId(fund) === profileId); if (activeOwnership === "others") funds = funds.filter(fund => fundCreatorId(fund) !== profileId); if (query) funds = funds.filter(fund => `${fund.title} ${fund.description || ""} ${posterName(fund)}`.toLowerCase().includes(query)); byId("funds-list").innerHTML = fundsHtml(sortFunds(funds), query ? "No matching funds" : "No funds in this view", query ? "Try another word or clear the search." : "Create a split fund to start tracking the house expenses."); document.querySelectorAll(".filter").forEach(button => button.classList.toggle("active", button.dataset.filter === activeFilter)); document.querySelectorAll("[data-fund-owner]").forEach(button => button.classList.toggle("active", button.dataset.fundOwner === activeOwnership)); }
 function legacy_renderMembers_1() { byId("member-total").textContent = `${state.members.length} house member${state.members.length === 1 ? "" : "s"}`; byId("members-list").innerHTML = state.members.map(member => `<article class="member-card"><span class="avatar">${initials(member.name)}</span><span><b>${escapeHtml(member.name)}</b><small>${memberFundCount(member.id)} split fund${memberFundCount(member.id) === 1 ? "" : "s"}</small></span><button type="button" data-delete-member="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">×</button></article>`).join("") || `<div class="empty-state"><b>No members yet</b>Add your housemates before creating a fund.</div>`; }
 const memberFundCount = id => state.funds.filter(fund => fund.memberIds.includes(id)).length;
@@ -48,8 +48,8 @@ byId("fund-form").addEventListener("submit", async event => { event.preventDefau
 byId("member-form").addEventListener("submit", async event => { event.preventDefault(); const name = byId("member-name").value.trim(); try { state = await api("/api/members", {method:"POST",body:JSON.stringify({name})}); const newMember = state.members.at(-1); byId("member-modal").hidden = true; render(); if (!byId("fund-modal").hidden) refreshFundMemberChoices(newMember?.id); showToast(`${name} was added.`); } catch(error) { showToast(error.message); } });
 byId("edit-fund").addEventListener("click", () => { const fund = state.funds.find(item => item.id === activeFundId); byId("detail-modal").hidden = true; openFundModal(fund); });
 byId("delete-fund").addEventListener("click", async () => { const fund = state.funds.find(item => item.id === activeFundId); if (!confirm(`Delete “${fund.title}”? This cannot be undone.`)) return; try { state = await api(`/api/funds/${fund.id}`, {method:"DELETE"}); closeModals(); render(); showToast("Split fund deleted."); } catch(error) { showToast(error.message); } });
-window.addEventListener("hashchange", () => { const route = location.hash.slice(1); if (["overview","funds","members","more"].includes(route) && route !== activeRoute) showRoute(route); });
-const initialRoute = location.hash.slice(1); if (["overview","funds","members","more"].includes(initialRoute)) activeRoute = initialRoute; showRoute(activeRoute); loadState(); setInterval(() => loadState(true), 60000);
+window.addEventListener("hashchange", () => { const rawRoute = location.hash.slice(1), route = rawRoute === "more" ? "profile" : rawRoute; if (rawRoute === "more") { location.hash = "profile"; return; } if (["overview","funds","members","profile"].includes(route) && route !== activeRoute) showRoute(route); });
+const initialRoute = location.hash.slice(1) === "more" ? "profile" : location.hash.slice(1); if (["overview","funds","members","profile"].includes(initialRoute)) activeRoute = initialRoute; showRoute(activeRoute); loadState(); setInterval(() => loadState(true), 60000);
 
 // A profile is a lightweight, device-local selection—not a password account.
 const PROFILE_STORAGE_KEY = "splitwise-house-profile-id";
@@ -108,7 +108,7 @@ function render() {
   renderOverview();
   renderFunds();
   renderMembers();
-  renderMore();
+  renderProfile();
   if (activeFundId) renderDetail();
   if (profileRequired) openProfilePicker();
 }
@@ -116,11 +116,11 @@ function render() {
 function showRoute(route) {
   if (state.members.length && (!currentProfile() || forceSharedProfile || forceProfileSelection)) return openProfilePicker();
   activeRoute = route;
-  ["overview", "funds", "members", "more"].forEach(name => byId(`${name}-view`).hidden = name !== route);
+  ["overview", "funds", "members", "profile"].forEach(name => byId(`${name}-view`).hidden = name !== route);
   if (window.location.hash.slice(1) !== route) window.location.hash = route;
   renderNavigation();
   if (route === "funds") renderFunds();
-  if (route === "more") renderMore();
+  if (route === "profile") renderProfile();
 }
 
 function legacy_openProfilePicker_1() {
@@ -482,20 +482,21 @@ byId("member-photo-input").addEventListener("change", async event => {
   }
 });
 
-let editingMemberId = null;
+let editingMemberId = null, memberCreationRequiresPayment = false;
 const ADMIN_MEMBER_ID = "member-1";
 const isAdmin = () => currentProfile()?.id === ADMIN_MEMBER_ID;
 const canManageMember = member => isAdmin() || currentProfile()?.id === member.id;
 
 function ensureMemberContactField() {
   if (byId("member-contact")) return;
-  byId("member-name").closest("label").insertAdjacentHTML("afterend", `<label><span>Nickname <em>optional</em></span><input id="member-nickname" maxlength="30" placeholder="How you want to be known" /></label><label><span>Profile label <em>optional</em></span><input id="member-label" maxlength="40" placeholder="e.g. Rent coordinator" /></label><label><span>Contact <em>optional</em></span><input id="member-contact" maxlength="80" placeholder="Phone, email, or contact note" autocomplete="email" /></label><label><span>Member ID color</span><select id="member-theme"><option value="sakura-pink">Sakura Pink</option><option value="wise-green">Wise Green</option><option value="gotyme-light-blue">GoTyme Light Blue</option><option value="royal-gray">Royal Gray</option><option value="maribank-orange">MariBank Orange</option><option value="maya-black">Maya Black</option><option value="bpi-maroon">BPI Maroon</option></select></label><button class="secondary-button manage-qr-button" type="button" data-manage-member-qr>Manage payment QR codes</button>`);
+  byId("member-name").closest("label").insertAdjacentHTML("afterend", `<label><span>Nickname <em>optional</em></span><input id="member-nickname" maxlength="30" placeholder="How you want to be known" /></label><label><span>Profile label <em>optional</em></span><input id="member-label" maxlength="40" placeholder="e.g. Rent coordinator" /></label><label><span>Contact <em>optional</em></span><input id="member-contact" maxlength="80" placeholder="Phone, email, or contact note" autocomplete="email" /></label><label><span>Member ID color</span><select id="member-theme"><option value="sakura-pink">Sakura Pink</option><option value="wise-green">Wise Green</option><option value="gotyme-light-blue">GoTyme Light Blue</option><option value="royal-gray">Royal Gray</option><option value="maribank-orange">MariBank Orange</option><option value="maya-black">Maya Black</option><option value="bpi-maroon">BPI Maroon</option></select></label><fieldset class="new-member-payment-setup" id="new-member-payment-setup" hidden><legend>Payment profile</legend><p>Add the QR payment details before creating this account.</p><label><span>Bank or wallet</span><input id="new-member-payment-label" maxlength="30" placeholder="e.g. GCash · Jamie" /></label><label class="qr-upload-label"><span>Payment QR code</span><input id="new-member-payment-image" type="file" accept="image/png,image/jpeg,image/webp" /></label><small>PNG, JPG, JPEG, or WebP · up to 2 MB</small></fieldset><button class="secondary-button manage-qr-button" type="button" data-manage-member-qr>Manage payment QR codes</button>`);
 }
 
 function openMemberModal(member = null) {
   ensureMemberContactField();
   if (member && !canManageMember(member)) return showToast("You can only edit your own account.");
   editingMemberId = member?.id || null;
+  memberCreationRequiresPayment = !member;
   byId("member-modal").hidden = false;
   byId("member-modal").querySelector(".eyebrow").textContent = member ? "EDIT MEMBER" : "NEW MEMBER";
   byId("member-modal").querySelector("h2").textContent = member ? `Edit ${member.name}` : "Add someone to Group Funds Calculator";
@@ -505,6 +506,11 @@ function openMemberModal(member = null) {
   byId("member-label").value = member?.label || "";
   byId("member-contact").value = member?.contact || "";
   byId("member-theme").value = member?.theme || "maya-black";
+  byId("new-member-payment-setup").hidden = !memberCreationRequiresPayment;
+  byId("new-member-payment-label").required = memberCreationRequiresPayment;
+  byId("new-member-payment-image").required = memberCreationRequiresPayment;
+  if (memberCreationRequiresPayment) { byId("new-member-payment-label").value = ""; byId("new-member-payment-image").value = ""; }
+  byId("member-form").querySelector("[data-manage-member-qr]").hidden = memberCreationRequiresPayment;
   byId("member-form").querySelector("button[type=submit]").textContent = member ? "Save member" : "Add member";
   byId("member-name").focus();
 }
@@ -545,12 +551,19 @@ byId("member-form").addEventListener("submit", async event => {
   const existing = editingMemberId ? state.members.find(member => member.id === editingMemberId) : null;
   if (existing && !canManageMember(existing)) return showToast("You can only manage your own account.");
   try {
+    let paymentMethods = existing?.paymentMethods || [];
+    if (!editingMemberId) {
+      const paymentLabel = byId("new-member-payment-label").value.trim(), paymentFile = byId("new-member-payment-image").files?.[0];
+      if (!memberCreationRequiresPayment || !paymentLabel || !paymentFile) return showToast("Add a bank or wallet and payment QR before creating the profile.");
+      paymentMethods = [{ id:crypto.randomUUID(), label:paymentLabel, image:await compressMemberPhoto(paymentFile, 720, "qr") }];
+    }
     state = editingMemberId
       ? await api(`/api/members/${editingMemberId}`, { method:"PATCH", body:JSON.stringify({ name, nickname, label, contact, theme, avatar:existing.avatar || "", paymentMethods:existing.paymentMethods || [] }) })
-      : await api("/api/members", { method:"POST", body:JSON.stringify({ name, nickname, label, contact, theme, avatar:"", paymentMethods:[] }) });
+      : await api("/api/members", { method:"POST", body:JSON.stringify({ name, nickname, label, contact, theme, avatar:"", paymentMethods }) });
     const newMember = editingMemberId ? null : state.members.at(-1);
-    editingMemberId = null;
+    editingMemberId = null; memberCreationRequiresPayment = false;
     byId("member-modal").hidden = true;
+    if (newMember) { currentMemberId = newMember.id; forceSharedProfile = false; forceProfileSelection = false; localStorage.setItem(PROFILE_STORAGE_KEY, currentMemberId); }
     render();
     if (!byId("fund-modal").hidden) refreshFundMemberChoices(newMember?.id);
     showToast(newMember ? `${name} was added.` : "Member details updated.");
@@ -594,9 +607,9 @@ function openPaymentProfile(member) {
   byId("payment-profile-modal").hidden = false;
 }
 
-function renderMore() {
+function renderProfile() {
   const profile = currentProfile(), unpaid = profile ? memberUnpaidFunds(profile.id) : [], owed = profile ? memberOwed(profile.id) : 0;
-  byId("tracker-title").textContent = profile ? `${profile.nickname || profile.name}'s tracker` : "My payments";
+  byId("tracker-title").textContent = profile ? `${profile.nickname || profile.name}'s profile` : "Profile";
   byId("profile-summary").innerHTML = profile ? `<span class="avatar">${accountAvatarContent(profile)}</span><span><b>${escapeHtml(profile.nickname || profile.name)}</b><small>${unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"} · ${money(owed)} to pay` : "You are all caught up"}</small></span><span class="profile-summary-actions"><button type="button" data-edit-current-profile>Edit my details</button><button type="button" data-open-profile>Switch accounts</button></span>` : `<span class="avatar">?</span><span><b>No member selected</b><small>Select who is using this device to see their tracker.</small></span><button type="button" data-open-profile>Choose</button>`;
   byId("unpaid-count").textContent = unpaid.length;
   byId("personal-unpaid-list").innerHTML = unpaid.length ? unpaid.map(profileFundHtml).join("") : `<div class="empty-state"><b>${profile ? "All caught up" : "Choose a member"}</b>${profile ? "There are no unpaid split funds for this profile." : "Select a profile to see personal payment reminders."}</div>`;
@@ -644,7 +657,6 @@ function renderProfileChrome() {
 let pipolStackIndex = 0;
 function renderMembers() {
   byId("member-total").textContent = `${state.members.length} member account${state.members.length === 1 ? "" : "s"}`;
-  const addButton = document.querySelector("[data-open-member]"); if (addButton) addButton.hidden = !isAdmin();
   pipolStackIndex = Math.min(pipolStackIndex, Math.max(0, state.members.length - 1));
   byId("members-list").innerHTML = state.members.map((member, index) => {
     const unpaid = memberUnpaidFunds(member.id), status = unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"}` : "All paid up", canManage = canManageMember(member);
@@ -663,9 +675,15 @@ document.addEventListener("click", event => {
 });
 
 function openProfilePicker() {
-  byId("profile-picker-list").innerHTML = state.members.map(member => `<button class="profile-choice" type="button" data-select-profile="${member.id}"><span class="avatar">${accountAvatarContent(member)}</span><b>${escapeHtml(member.nickname || member.name)}</b><small>${escapeHtml(member.label || (memberUnpaidFunds(member.id).length ? `${memberUnpaidFunds(member.id).length} payment${memberUnpaidFunds(member.id).length === 1 ? "" : "s"} waiting` : "All caught up"))}</small></button>`).join("");
+  byId("profile-picker-list").innerHTML = `${state.members.map(member => `<button class="profile-choice" type="button" data-select-profile="${member.id}"><span class="avatar">${accountAvatarContent(member)}</span><b>${escapeHtml(member.nickname || member.name)}</b><small>${escapeHtml(member.label || (memberUnpaidFunds(member.id).length ? `${memberUnpaidFunds(member.id).length} payment${memberUnpaidFunds(member.id).length === 1 ? "" : "s"} waiting` : "All caught up"))}</small></button>`).join("")}<button class="profile-choice profile-choice-add" type="button" data-create-member><span class="avatar">＋</span><b>Add member</b><small>Set up their payment profile</small></button>`;
   byId("profile-modal").hidden = false;
 }
+
+document.addEventListener("click", event => {
+  if (!event.target.closest("[data-create-member]")) return;
+  byId("profile-modal").hidden = true;
+  openMemberModal();
+});
 
 document.addEventListener("click", event => {
   const removeButton = event.target.closest("[data-delete-member]");

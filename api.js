@@ -62,6 +62,7 @@ module.exports = async (request, response) => {
     const state = await readState();
     const member = isSingleMember ? state.members.find(item => item.id === parts[2]) : null;
     if (isSingleMember && !member) return sendJson(response, 404, { error:"Member not found." });
+    if (!member && !paymentMethods.length) throw new Error("Set up at least one payment QR before creating a member profile.");
     if (member && name !== member.name) throw new Error("Member account names are fixed; edit the nickname or profile label instead.");
     if (state.members.some(item => item.id !== member?.id && item.name.toLowerCase() === name.toLowerCase())) throw new Error("That member is already in this group.");
     if (member) Object.assign(member, { name, contact, nickname, label, avatar, theme, paymentMethods });
