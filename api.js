@@ -100,7 +100,7 @@ function validFund(input, members) {
   if (!title) throw new Error("A fund title is required.");
   if (title.length > 80 || description.length > 1200) throw new Error("Please shorten the title or description.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Choose a valid date.");
-  if (receipt && (!/^data:image\/(png|jpeg|webp);base64,/i.test(receipt) || receipt.length > 900000)) throw new Error("Choose a smaller PNG, JPEG, or WebP receipt image.");
+  if (receipt && (!/^data:image\/(png|jpeg);base64,/i.test(receipt) || receipt.length > 900000)) throw new Error("Choose a smaller JPG, JPEG, or PNG receipt image.");
   if (splitMode === "itemized") {
     const payerId = String(input.payerId || ""), rawItems = Array.isArray(input.items) ? input.items.slice(0, 40) : [], guests = validGuests(input, members), sharesInCents = {};
     const peopleById = new Map([...members, ...guests].map(person => [person.id, person]));
