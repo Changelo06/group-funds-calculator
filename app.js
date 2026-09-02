@@ -674,14 +674,17 @@ document.addEventListener("click", async event => {
 byId("share-fund").addEventListener("click", async () => {
   const fund = state.funds.find(item => item.id === activeFundId);
   if (!fund) return;
-  const link = new URL(location.href);
+  const creator = posterName(fund), shareTitle = `${fund.title} · ${creator}`, link = new URL(location.href);
   link.searchParams.set("fund", fund.id);
+  link.searchParams.set("title", fund.title);
+  link.searchParams.set("creator", creator);
   link.hash = "funds";
+  const shareText = `${shareTitle}\n${link.toString()}`;
   try {
-    await navigator.clipboard.writeText(link.toString());
-    showToast("Share link copied. It will ask the visitor to choose a profile.");
+    await navigator.clipboard.writeText(shareText);
+    showToast(`Share link copied for ${shareTitle}.`);
   } catch {
-    window.prompt("Copy this share link", link.toString());
+    window.prompt(`Copy ${shareTitle}`, shareText);
   }
 });
 
