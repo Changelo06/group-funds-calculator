@@ -77,6 +77,7 @@ button:disabled{cursor:wait;opacity:.65}
 .fund-copy .fund-creator{color:#777;font-size:.92em;font-style:normal;font-weight:500}
 .detail-receipt{display:inline-flex!important;align-items:center;margin:-10px 0 16px;padding:0;border:0;background:transparent;color:#000;font-size:10px;font-weight:600;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}.detail-receipt b{margin-left:2px;font-size:11px}.detail-receipt.no-receipt{color:#8a8a8a;font-weight:500;text-decoration:none;cursor:default}.detail-receipt:disabled{opacity:1}
 .detail-edit-button{display:grid;place-items:center;width:30px;min-height:30px!important;padding:0!important;border-radius:50%!important;font-size:16px!important;line-height:1}
+.profile-choice{position:relative}.profile-unpaid-badge,.member-id-unpaid{display:grid;place-items:center;min-width:17px;height:17px;padding:0 5px;border-radius:999px;background:#000;color:#fff;font:700 9px "DM Mono",monospace;line-height:1}.profile-unpaid-badge{position:absolute;top:9px;right:9px}.member-id-unpaid{position:absolute;top:8px;right:9px;height:18px;font-size:8px;letter-spacing:.01em}
 .profile-required .app-shell{visibility:visible;filter:blur(12px);opacity:.18;pointer-events:none;user-select:none}.profile-picker{background:rgba(255,255,255,.82)!important;backdrop-filter:blur(20px) saturate(.7)}
 
 /* Dense Split Funds toolbar. */
