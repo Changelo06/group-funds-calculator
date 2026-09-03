@@ -43,7 +43,7 @@ function renderReceiptPreview() { const preview = byId("receipt-preview"); previ
 function closeModals() { document.querySelectorAll(".modal-backdrop").forEach(modal => modal.hidden = true); activeFundId = null; }
 function renderCalculator() { byId("calculator-display").textContent = calculatorExpression ? calculatorExpression.replace(/\*/g,"×").replace(/\//g,"÷") : "0"; }
 async function compressReceipt(file) { const accepted = ["image/png", "image/jpeg"]; if (!file || !accepted.includes(file.type)) throw new Error("Receipt images must be JPG, JPEG, or PNG files."); if (file.size > 5 * 1024 * 1024) throw new Error("Receipt images must be 5 MB or smaller."); const source = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error("The receipt could not be read.")); reader.readAsDataURL(file); }); const image = await new Promise((resolve,reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = () => reject(new Error("The receipt image could not be opened.")); element.src = source; }); const scale = Math.min(1, 1000 / Math.max(image.width, image.height)); const canvas = document.createElement("canvas"); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale); canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height); let encoded = canvas.toDataURL("image/jpeg", .76); if (encoded.length > 850000) { canvas.width = Math.round(canvas.width * .78); canvas.height = Math.round(canvas.height * .78); canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height); encoded = canvas.toDataURL("image/jpeg", .62); } if (encoded.length > 900000) throw new Error("That receipt could not be compressed enough. Please choose a smaller image."); return encoded; }
-document.addEventListener("click", event => { const route = event.target.closest("[data-route]"); if (route) { event.preventDefault(); showRoute(route.dataset.route); return; } if (event.target.closest("[data-open-fund]") || event.target.closest("#mobile-add")) return openFundModal(); if (event.target.closest("[data-open-member]")) return openMemberModal(); if (event.target.closest("[data-close-modal]")) return closeModals(); const filter = event.target.closest(".filter"); if(filter) { activeFilter = filter.dataset.filter; renderFunds(); return; } const row = event.target.closest("[data-fund-id]"); if(row) { activeFundId = row.dataset.fundId; renderDetail(); } });
+document.addEventListener("click", event => { const route = event.target.closest("[data-route]"); if (route) { event.preventDefault(); showRoute(route.dataset.route); return; } if (event.target.closest("[data-open-fund]") || event.target.closest("#mobile-add")) return openFundModal(); if (event.target.closest("[data-open-member]")) return openMemberModal(); const closeButton = event.target.closest("[data-close-modal]"); if (closeButton) { const modal = closeButton.closest(".modal-backdrop"); if (modal?.id === "receipt-preview-modal") { modal.hidden = true; return; } return closeModals(); } const filter = event.target.closest(".filter"); if(filter) { activeFilter = filter.dataset.filter; renderFunds(); return; } const row = event.target.closest("[data-fund-id]"); if(row) { activeFundId = row.dataset.fundId; renderDetail(); } });
 byId("fund-search").addEventListener("input", renderFunds); byId("fund-sort").addEventListener("change", event => { activeSort = event.target.value; renderFunds(); }); byId("fund-total").addEventListener("input", updateFundPreview); byId("fund-member-select").addEventListener("change", updateFundPreview); byId("select-all-members").addEventListener("change", event => { document.querySelectorAll(".member-choice input").forEach(input => input.checked = event.target.checked); updateFundPreview(); });
 byId("edit-fund").addEventListener("click", () => { const fund = state.funds.find(item => item.id === activeFundId); byId("detail-modal").hidden = true; openFundModal(fund); });
 byId("delete-fund").addEventListener("click", async () => { const fund = state.funds.find(item => item.id === activeFundId); if (!fund || !confirm(`Delete “${fund.title}”? This cannot be undone.`)) return; await withPending(`fund-delete:${fund.id}`, byId("delete-fund"), "Deleting…", async () => { try { state = await api(`/api/funds/${fund.id}`, {method:"DELETE"}); closeModals(); render(); showToast("Split fund deleted."); } catch(error) { showToast(error.message); } }); });
@@ -299,6 +299,18 @@ function generateReceipt(fund) {
   receipt.document.close();
 }
 
+function ensureReceiptPreview() {
+  if (byId("receipt-preview-modal")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop" id="receipt-preview-modal" hidden><section class="modal receipt-preview-modal-card" aria-labelledby="receipt-preview-title"><div class="modal-header"><h2 id="receipt-preview-title">Attached receipt</h2><button class="close-button" type="button" data-close-modal aria-label="Close receipt">×</button></div><img id="receipt-preview-full-image" alt="Attached receipt" /></section></div>`);
+}
+
+function openReceiptPreview(fund) {
+  ensureReceiptPreview();
+  byId("receipt-preview-title").textContent = `${fund.title} receipt`;
+  byId("receipt-preview-full-image").src = fund.receipt;
+  byId("receipt-preview-modal").hidden = false;
+}
+
 function renderDetail() {
   const fund = state.funds.find(item => item.id === activeFundId); if (!fund) return closeModals();
   const people = fundPeople(fund), payablePeople = people.filter(person => payableMemberIds(fund).includes(person.id)), count = paidCount(fund), payer = state.members.find(member => member.id === fund.payerId), receivingProfile = fund.splitMode === "itemized" ? (payer || fundPerson(fund, fund.payerId)) : fundPerson(fund, fundCreatorId(fund)); byId("detail-date").textContent = `${dateLabel(fund.date)} · ${fund.splitMode === "itemized" ? "ITEMIZED ORDER" : "SPLIT FUND"}`; byId("detail-title").textContent = fund.title;
@@ -402,7 +414,7 @@ const canManageMember = member => isAdmin() || currentProfile()?.id === member.i
 
 function ensureMemberContactField() {
   if (byId("member-contact")) return;
-  byId("member-name").closest("label").insertAdjacentHTML("afterend", `<label><span>Nickname <em>optional</em></span><input id="member-nickname" maxlength="30" placeholder="How you want to be known" /></label><label><span>Profile label <em>optional</em></span><input id="member-label" maxlength="40" placeholder="e.g. Rent coordinator" /></label><label><span>Contact <em>optional</em></span><input id="member-contact" maxlength="80" placeholder="Phone, email, or contact note" autocomplete="email" /></label><label><span>Member ID color</span><select id="member-theme"><option value="sakura-pink">Sakura Pink</option><option value="wise-green">Wise Green</option><option value="gotyme-light-blue">GoTyme Light Blue</option><option value="royal-gray">Royal Gray</option><option value="maribank-orange">MariBank Orange</option><option value="maya-black">Maya Black</option><option value="bpi-maroon">BPI Maroon</option></select></label><fieldset class="new-member-payment-setup" id="new-member-payment-setup" hidden><legend>Payment profile</legend><p>Add the QR payment details before creating this account.</p><label><span>Bank or wallet</span><input id="new-member-payment-label" maxlength="30" placeholder="e.g. GCash · Jamie" /></label><label class="qr-upload-label"><span>Payment QR code</span><input id="new-member-payment-image" type="file" accept="image/png,image/jpeg,image/webp" /></label><small>PNG, JPG, JPEG, or WebP · up to 2 MB</small></fieldset><button class="secondary-button manage-qr-button" type="button" data-manage-member-qr>Manage payment QR codes</button>`);
+  byId("member-name").closest("label").insertAdjacentHTML("afterend", `<label><span>Nickname <em>optional</em></span><input id="member-nickname" maxlength="30" placeholder="How you want to be known" /></label><label><span>Profile label <em>optional</em></span><input id="member-label" maxlength="40" placeholder="e.g. Rent coordinator" /></label><label><span>Bio <em>optional</em></span><textarea id="member-bio" maxlength="120" placeholder="e.g. Computer Engineering · Coffee-powered builder"></textarea></label><label><span>Contact <em>optional</em></span><input id="member-contact" maxlength="80" placeholder="Phone, email, or contact note" autocomplete="email" /></label><label><span>Member ID color</span><select id="member-theme"><option value="sakura-pink">Sakura Pink</option><option value="wise-green">Wise Green</option><option value="gotyme-light-blue">GoTyme Light Blue</option><option value="royal-gray">Royal Gray</option><option value="maribank-orange">MariBank Orange</option><option value="maya-black">Maya Black</option><option value="bpi-maroon">BPI Maroon</option></select></label><fieldset class="new-member-payment-setup" id="new-member-payment-setup" hidden><legend>Payment profile</legend><p>Add the QR payment details before creating this account.</p><label><span>Bank or wallet</span><input id="new-member-payment-label" maxlength="30" placeholder="e.g. GCash · Jamie" /></label><label class="qr-upload-label"><span>Payment QR code</span><input id="new-member-payment-image" type="file" accept="image/png,image/jpeg,image/webp" /></label><small>PNG, JPG, JPEG, or WebP · up to 2 MB</small></fieldset><button class="secondary-button manage-qr-button" type="button" data-manage-member-qr>Manage payment QR codes</button>`);
 }
 
 function openMemberModal(member = null) {
@@ -417,6 +429,7 @@ function openMemberModal(member = null) {
   byId("member-name").readOnly = Boolean(member);
   byId("member-nickname").value = member?.nickname || "";
   byId("member-label").value = member?.label || "";
+  byId("member-bio").value = member?.bio || "";
   byId("member-contact").value = member?.contact || "";
   byId("member-theme").value = member?.theme || "maya-black";
   byId("new-member-payment-setup").hidden = !memberCreationRequiresPayment;
@@ -451,7 +464,7 @@ document.addEventListener("click", event => {
 
 byId("member-form").addEventListener("submit", async event => {
   event.preventDefault();
-  const name = byId("member-name").value.trim(), nickname = byId("member-nickname").value.trim(), label = byId("member-label").value.trim(), contact = byId("member-contact").value.trim(), theme = byId("member-theme").value;
+  const name = byId("member-name").value.trim(), nickname = byId("member-nickname").value.trim(), label = byId("member-label").value.trim(), bio = byId("member-bio").value.trim(), contact = byId("member-contact").value.trim(), theme = byId("member-theme").value;
   const existing = editingMemberId ? state.members.find(member => member.id === editingMemberId) : null;
   if (existing && !canManageMember(existing)) return showToast("You can only manage your own account.");
   const submitButton = byId("member-form").querySelector("button[type=submit]"), pendingKey = editingMemberId ? `member:${editingMemberId}` : "member:create";
@@ -463,8 +476,8 @@ byId("member-form").addEventListener("submit", async event => {
       paymentMethods = [{ id:crypto.randomUUID(), label:paymentLabel, image:await compressMemberPhoto(paymentFile, 720, "qr") }];
     }
     state = editingMemberId
-      ? await api(`/api/members/${editingMemberId}`, { method:"PATCH", body:JSON.stringify({ name, nickname, label, contact, theme, avatar:existing.avatar || "", paymentMethods:existing.paymentMethods || [] }) })
-      : await api("/api/members", { method:"POST", body:JSON.stringify({ name, nickname, label, contact, theme, avatar:"", paymentMethods }) });
+      ? await api(`/api/members/${editingMemberId}`, { method:"PATCH", body:JSON.stringify({ name, nickname, label, bio, contact, theme, avatar:existing.avatar || "", paymentMethods:existing.paymentMethods || [] }) })
+      : await api("/api/members", { method:"POST", body:JSON.stringify({ name, nickname, label, bio, contact, theme, avatar:"", paymentMethods }) });
     const newMember = editingMemberId ? null : state.members.at(-1);
     editingMemberId = null; memberCreationRequiresPayment = false;
     byId("member-modal").hidden = true;
@@ -551,7 +564,7 @@ function fundsHtml(funds, emptyTitle, emptyCopy) {
 }
 
 const accountAvatarContent = member => member.avatar ? `<img src="${escapeHtml(member.avatar)}" alt="" loading="lazy" decoding="async" />` : initials(member.name);
-const accountPayload = member => ({ name:member.name, nickname:member.nickname || "", label:member.label || "", contact:member.contact || "", theme:member.theme || "maya-black", avatar:member.avatar || "", paymentMethods:member.paymentMethods || [] });
+const accountPayload = member => ({ name:member.name, nickname:member.nickname || "", label:member.label || "", bio:member.bio || "", contact:member.contact || "", theme:member.theme || "maya-black", avatar:member.avatar || "", paymentMethods:member.paymentMethods || [] });
 
 function renderProfileChrome() {
   const profile = currentProfile();
@@ -560,25 +573,15 @@ function renderProfileChrome() {
   byId("overview-greeting").textContent = profile ? `Good morning, ${profile.nickname || profile.name}` : "Welcome to Group Funds Calculator";
 }
 
-let pipolStackIndex = 0;
 function renderMembers() {
   byId("member-total").textContent = `${state.members.length} member account${state.members.length === 1 ? "" : "s"}`;
-  pipolStackIndex = Math.min(pipolStackIndex, Math.max(0, state.members.length - 1));
   byId("members-list").innerHTML = state.members.map((member, index) => {
-    const unpaid = memberUnpaidFunds(member.id), status = unpaid.length ? `${unpaid.length} unpaid split${unpaid.length === 1 ? "" : "s"}` : "All paid up", canManage = canManageMember(member);
+    const canManage = canManageMember(member), paymentReady = paymentMethods(member).length > 0;
     const avatar = canManage ? `<button class="avatar avatar-photo" type="button" data-select-member-photo="${member.id}" aria-label="Change ${escapeHtml(member.name)} profile photo">${accountAvatarContent(member)}<i>＋</i></button>` : `<span class="avatar">${accountAvatarContent(member)}</span>`;
-    const actions = `<button class="view-payment-button" type="button" data-view-payment-profile="${member.id}">Payment profile</button>${canManage ? `<button class="edit-member-button" type="button" data-edit-member="${member.id}">Edit</button>` : ""}`;
-    const stackPosition = (index - pipolStackIndex + state.members.length) % state.members.length;
-    return `<article class="member-id-card pipol-card pipol-card-${Math.min(stackPosition, 3)}" data-theme="${escapeHtml(member.theme || "maya-black")}" data-rotate-pipol aria-label="Show next member card"><div class="member-id-band"><span>RM331</span><span>MEMBER ID ${String(index + 1).padStart(2, "0")}</span></div><div class="member-id-main">${avatar}<span class="member-id-copy"><small>${escapeHtml(member.label || "HOUSE MEMBER")}</small><b>${escapeHtml(member.nickname || member.name)}</b><span>${escapeHtml(member.contact || "No contact added")}</span></span></div><div class="member-id-footer"><span>${memberFundCount(member.id)} shared fund${memberFundCount(member.id) === 1 ? "" : "s"}</span><b class="${unpaid.length ? "owing" : ""}">${status}</b></div><div class="member-id-actions">${actions}</div></article>`;
+    const actions = `<button class="view-payment-button" type="button" data-view-payment-profile="${member.id}">Payment profile</button><button class="select-account-button" type="button" data-select-profile="${member.id}">Use account</button>${canManage ? `<button class="edit-member-button" type="button" data-edit-member="${member.id}">Edit</button>` : ""}`;
+    return `<article class="member-id-card pipol-card" data-theme="${escapeHtml(member.theme || "maya-black")}"><div class="member-id-band"><span>RM331</span><span>MEMBER ID ${String(index + 1).padStart(2, "0")}</span></div><div class="member-id-main">${avatar}<span class="member-id-copy"><small>${escapeHtml(member.label || "HOUSE MEMBER")}</small><b>${escapeHtml(member.nickname || member.name)}</b>${member.bio ? `<p class="member-id-bio">${escapeHtml(member.bio)}</p>` : ""}<span class="member-id-payment">${paymentReady ? "Payment profile ready" : "No payment profile"}</span></span></div><div class="member-id-footer"><span>${memberFundCount(member.id)} shared fund${memberFundCount(member.id) === 1 ? "" : "s"}</span><span>${paymentReady ? "QR available" : "QR not added"}</span></div><div class="member-id-actions">${actions}</div></article>`;
   }).join("") || `<div class="empty-state"><b>No accounts available</b>This group is limited to its five member profiles.</div>`;
 }
-
-document.addEventListener("click", event => {
-  const card = event.target.closest("[data-rotate-pipol]");
-  if (!card || event.target.closest("button")) return;
-  pipolStackIndex = (pipolStackIndex + 1) % Math.max(1, state.members.length);
-  renderMembers();
-});
 
 function openProfilePicker() {
   byId("profile-picker-list").innerHTML = `${state.members.map(member => `<button class="profile-choice" type="button" data-select-profile="${member.id}"><span class="avatar">${accountAvatarContent(member)}</span><b>${escapeHtml(member.nickname || member.name)}</b><small>${escapeHtml(member.label || (memberUnpaidFunds(member.id).length ? `${memberUnpaidFunds(member.id).length} payment${memberUnpaidFunds(member.id).length === 1 ? "" : "s"} waiting` : "All caught up"))}</small></button>`).join("")}<button class="profile-choice profile-choice-add" type="button" data-create-member><span class="avatar">＋</span><b>Add member</b><small>Set up their payment profile</small></button>`;
@@ -674,11 +677,11 @@ document.addEventListener("click", async event => {
 byId("share-fund").addEventListener("click", async () => {
   const fund = state.funds.find(item => item.id === activeFundId);
   if (!fund) return;
-  const creator = posterName(fund), shareTitle = `${fund.title} · ${creator}`, link = new URL(location.href);
+  const creator = posterName(fund), date = dateLabel(fund.date), shareTitle = `${fund.title} · ${creator} · ${date}`, link = new URL("/api/share", location.origin);
   link.searchParams.set("fund", fund.id);
   link.searchParams.set("title", fund.title);
   link.searchParams.set("creator", creator);
-  link.hash = "funds";
+  link.searchParams.set("date", date);
   const shareText = `${shareTitle}\n${link.toString()}`;
   try {
     await navigator.clipboard.writeText(shareText);
@@ -702,11 +705,12 @@ byId("generate-receipt")?.addEventListener("click", () => {
 
 byId("detail-receipt").addEventListener("click", async () => {
   const fund = state.funds.find(item => item.id === activeFundId);
-  if (!fund || (!fund.receipt && !fund.hasReceipt)) return;
-  if (fund.receipt) return window.open(fund.receipt, "_blank", "noopener,noreferrer");
-  const fullFund = await withPending(`receipt:${fund.id}`, byId("detail-receipt"), "Loading receipt…", () => ensureFundDetails(fund));
-  if (fullFund?.receipt) { renderDetail(); showToast("Receipt loaded. Tap it again to view."); }
-  else showToast("The receipt could not be loaded.");
+  if (!fund || (!fund.receipt && !fund.hasReceipt)) return showToast("No receipt attached.");
+  try {
+    const fullFund = fund.receipt ? fund : await withPending(`receipt:${fund.id}`, byId("detail-receipt"), "Loading receipt…", () => ensureFundDetails(fund));
+    if (fullFund?.receipt) return openReceiptPreview(fullFund);
+    showToast("The receipt could not be loaded. Please try again.");
+  } catch (error) { showToast(error.message || "The receipt could not be loaded. Please try again."); }
 });
 
 function renderSyncDateTime() {

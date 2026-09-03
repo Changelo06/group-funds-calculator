@@ -65,9 +65,9 @@ module.exports = async (request, response) => {
   const supportsMemberDetails = (isSingleMember && request.method === "PATCH") || (url.pathname === "/api/members" && request.method === "POST");
   if (!supportsMemberDetails) return originalApiHandler(request, response);
   try {
-    const input = await body(request), name = String(input.name || "").trim(), contact = String(input.contact || "").trim(), nickname = String(input.nickname || "").trim(), label = String(input.label || "").trim(), avatar = input.avatar == null ? "" : String(input.avatar), theme = String(input.theme || "maya-black"), paymentMethods = Array.isArray(input.paymentMethods) ? input.paymentMethods.slice(0, 3).map(item => ({ id:String(item.id || crypto.randomUUID()), label:String(item.label || "").trim(), image:String(item.image || "") })) : [];
+    const input = await body(request), name = String(input.name || "").trim(), contact = String(input.contact || "").trim(), nickname = String(input.nickname || "").trim(), label = String(input.label || "").trim(), bio = String(input.bio || "").trim(), avatar = input.avatar == null ? "" : String(input.avatar), theme = String(input.theme || "maya-black"), paymentMethods = Array.isArray(input.paymentMethods) ? input.paymentMethods.slice(0, 3).map(item => ({ id:String(item.id || crypto.randomUUID()), label:String(item.label || "").trim(), image:String(item.image || "") })) : [];
     if (!name || name.length > 50) throw new Error("Enter a member name up to 50 characters.");
-    if (contact.length > 80 || nickname.length > 30 || label.length > 40) throw new Error("Keep account details within the allowed length.");
+    if (contact.length > 80 || nickname.length > 30 || label.length > 40 || bio.length > 120) throw new Error("Keep account details within the allowed length.");
     if (!PROFILE_THEMES.has(theme)) throw new Error("Choose one of the available member ID colors.");
     if (avatar && (!/^data:image\/jpeg;base64,/i.test(avatar) || avatar.length > 2800000)) throw new Error("Profile photos must be JPG or JPEG files under 2 MB.");
     if (paymentMethods.some(method => !method.label || method.label.length > 30 || !/^data:image\/(png|jpeg|webp);base64,/i.test(method.image) || method.image.length > 2800000)) throw new Error("Each payment QR needs a bank label and an image under 2 MB.");
@@ -77,8 +77,8 @@ module.exports = async (request, response) => {
     if (!member && !paymentMethods.length) throw new Error("Set up at least one payment QR before creating a member profile.");
     if (member && name !== member.name) throw new Error("Member account names are fixed; edit the nickname or profile label instead.");
     if (state.members.some(item => item.id !== member?.id && item.name.toLowerCase() === name.toLowerCase())) throw new Error("That member is already in this group.");
-    if (member) Object.assign(member, { name, contact, nickname, label, avatar, theme, paymentMethods });
-    else state.members.push({ id:crypto.randomUUID(), name, contact, nickname, label, avatar, theme, paymentMethods });
+    if (member) Object.assign(member, { name, contact, nickname, label, bio, avatar, theme, paymentMethods });
+    else state.members.push({ id:crypto.randomUUID(), name, contact, nickname, label, bio, avatar, theme, paymentMethods });
     return sendJson(response, member ? 200 : 201, await writeState(state));
   } catch (error) { return sendJson(response, 400, { error:error.message || "Something went wrong." }); }
 };
