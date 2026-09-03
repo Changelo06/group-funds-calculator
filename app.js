@@ -587,7 +587,7 @@ function renderMembers() {
 }
 
 function openProfilePicker() {
-  byId("profile-picker-list").innerHTML = `${state.members.map(member => { const unpaidCount = profileNotificationCount(member.id); return `<button class="profile-choice" type="button" data-select-profile="${member.id}">${unpaidCount ? `<span class="profile-unpaid-badge" aria-label="${unpaidCount} unpaid split funds">${notificationCountLabel(unpaidCount)}</span>` : ""}<span class="avatar">${accountAvatarContent(member)}</span><b>${escapeHtml(member.nickname || member.name)}</b><small>${escapeHtml(member.label || (unpaidCount ? `${unpaidCount} payment${unpaidCount === 1 ? "" : "s"} waiting` : "All caught up"))}</small></button>`; }).join("")}<button class="profile-choice profile-choice-add" type="button" data-create-member><span class="avatar">＋</span><b>Add member</b><small>Set up their payment profile</small></button>`;
+  byId("profile-picker-list").innerHTML = `${state.members.map(member => { const unpaidCount = profileNotificationCount(member.id); return `<button class="profile-choice" type="button" data-select-profile="${member.id}">${unpaidCount ? `<span class="profile-unpaid-badge" aria-label="${unpaidCount} unpaid split funds">${notificationCountLabel(unpaidCount)}</span>` : ""}<span class="avatar">${accountAvatarContent(member)}</span><b>${escapeHtml(member.nickname || member.name)}</b>${member.label ? `<small>${escapeHtml(member.label)}</small>` : ""}</button>`; }).join("")}<button class="profile-choice profile-choice-add" type="button" data-create-member><span class="avatar">＋</span><b>Add member</b><small>Set up their payment profile</small></button>`;
   byId("profile-modal").hidden = false;
 }
 
