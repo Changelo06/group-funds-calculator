@@ -63,6 +63,24 @@ When API files change, also run syntax checks for the affected Node files. Verif
 - receipt upload and preview;
 - mobile layout and profile switching.
 
+## Interface quality standard
+
+- Make every important interaction keyboard-operable. Use native elements before ARIA, give icon-only controls descriptive names, and keep focus rings visible with `:focus-visible`.
+- Use generous, forgiving hit targets: at least 24 px for desktop controls and 44 px for touch controls. Do not leave decorative-looking parts of an interactive control inert.
+- Keep browser zoom enabled. On mobile, use 16 px or larger text inputs where possible to prevent unintended browser zoom.
+- Keep each UI state honest: design loading, empty, dense, success, and failure states. A failed request must offer recovery, not an endless loader.
+- Loading feedback should preserve the original action label, use an ellipsis while work is in progress, and avoid flicker by delaying very short states or keeping them visible briefly when shown.
+- Prefer targeted, reversible optimistic feedback for likely-successful actions. If the request fails, restore the prior UI and explain how to recover.
+- Confirm destructive actions or provide a safe undo path. Never make deletion accidental.
+- Use URLs for shareable, refresh-safe context such as the active fund. Preserve expected Back/Forward behavior where a view has meaningful state.
+- Use CSS `transform` and `opacity` for motion whenever practical. Keep animation purposeful, interruptible, and compatible with `prefers-reduced-motion`; never transition every property with `transition: all`.
+- Match skeleton dimensions to the final layout to avoid layout shift. Do not use a skeleton to hide an error or a long-running operation.
+- Maintain intentional alignment, intrinsic responsive layout, safe-area spacing, and no unwanted horizontal overflow across mobile, laptop, and wide screens.
+- Use clear text alongside color-dependent meaning. Status, payment state, and errors must remain understandable without relying on color alone.
+- Keep labels associated with controls, place validation near the affected field, retain input values on validation failures, and never block paste or normal typing without feedback.
+- Use locale-aware money and dates, tabular numerals where values are compared, and resilient layouts for short or very long user-provided content.
+- Minimize main-thread work and unnecessary rerenders. Reserve image space, lazy-load noncritical imagery, and avoid additional network calls when the required data is already in memory.
+
 ## Git workflow
 
 - Keep commits focused and use descriptive messages.
